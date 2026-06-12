@@ -134,14 +134,19 @@ class LastHourGammaExplosion(Strategy):
     held until its bid reaches `target_mult` x our entry cost (profit target)
     or it expires at 15:00 settlement ("dies worthless" if it finishes OTM).
     Signals are only taken inside the [entry_time, exit_time] window — the last
-    hour, where 0DTE gamma is largest. Concurrent positions are allowed; each
-    is managed independently.
+    hour, where 0DTE gamma is largest.
+
+    With `reverse_on_opposite` (default), an opposite-side signal closes the
+    open position(s) at market before opening the new one — a stop-and-reverse
+    that cuts a losing side on the trend flip instead of letting it bleed to
+    expiry. With it off, positions are concurrent and each rides to its own
+    profit target or expiry.
     """
 
     def __init__(self, entry_time="14:00:00", exit_time="15:00:00",
                  atr_period=10, atr_mult=3.0, target_mult=5.0,
                  target_delta=0.20, qty=1, signal_symbol="ES",
-                 min_tte_secs=120):
+                 min_tte_secs=120, reverse_on_opposite=True):
         self.entry_time, self.exit_time = entry_time, exit_time
         self.atr_period, self.atr_mult = int(atr_period), float(atr_mult)
         self.target_mult, self.target_delta = float(target_mult), float(target_delta)
@@ -149,6 +154,7 @@ class LastHourGammaExplosion(Strategy):
         # don't act on a reversal with less than this long to expiry — too
         # little time left to buy a meaningful option (delta selection degenerates)
         self.min_tte_secs = int(min_tte_secs)
+        self.reverse_on_opposite = bool(reverse_on_opposite)
 
     def on_day_start(self, engine: Backtest) -> None:
         from ..indicators.supertrend import day_signals
@@ -185,6 +191,12 @@ class LastHourGammaExplosion(Strategy):
         for right in self.by_t.get(t, []):
             if tte < self.min_tte_secs:
                 continue
+            # stop-and-reverse: a new signal closes the opposite side at market
+            if self.reverse_on_opposite:
+                opp = PUT if right == CALL else CALL
+                for trade in list(engine.open_trades):
+                    if trade.legs[0].right == opp:
+                        engine.close(t, trade, "reverse")
             k = self._pick_delta_strike(day, t, right)
             if k is None:
                 continue

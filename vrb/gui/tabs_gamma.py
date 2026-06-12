@@ -12,9 +12,9 @@ from __future__ import annotations
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import (QComboBox, QDoubleSpinBox, QGroupBox, QHBoxLayout,
-                             QHeaderView, QLabel, QPushButton, QSpinBox,
-                             QSplitter, QTableWidget, QTableWidgetItem,
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox,
+                             QHBoxLayout, QHeaderView, QLabel, QPushButton,
+                             QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
 
 from ..backtest.strategies import LastHourGammaExplosion
@@ -63,6 +63,9 @@ class GammaExplosionTab(QWidget):
         self.qty_box = add("Contracts", QSpinBox()); self.qty_box.setRange(1, 100); self.qty_box.setValue(1)
         self.mintte_box = add("Min time-to-expiry (s)", QSpinBox())
         self.mintte_box.setRange(0, 3600); self.mintte_box.setValue(120); self.mintte_box.setSingleStep(30)
+        self.reverse_box = QCheckBox("Reverse on opposite signal (stop-and-reverse)")
+        self.reverse_box.setChecked(True)
+        form.addWidget(self.reverse_box)
 
         form.addWidget(self._sub("Signal window (CT)"))
         self.entry_box = add("Start time (hr)", QDoubleSpinBox())
@@ -126,6 +129,7 @@ class GammaExplosionTab(QWidget):
             target_delta=float(self.delta_box.value()),
             qty=int(self.qty_box.value()),
             min_tte=int(self.mintte_box.value()),
+            reverse=self.reverse_box.isChecked(),
         )
 
     # -------------------------------------------------------------- actions
@@ -144,7 +148,8 @@ class GammaExplosionTab(QWidget):
                 entry_time=p["entry_time"], exit_time=p["exit_time"],
                 atr_period=p["atr_period"], atr_mult=p["atr_mult"],
                 target_mult=p["target_mult"], target_delta=p["target_delta"],
-                qty=p["qty"], signal_symbol=p["symbol"], min_tte_secs=p["min_tte"])
+                qty=p["qty"], signal_symbol=p["symbol"], min_tte_secs=p["min_tte"],
+                reverse_on_opposite=p["reverse"])
 
         self.run_btn.setEnabled(False)
         self.status.setText(f"Running over {len(dates)} days...")
