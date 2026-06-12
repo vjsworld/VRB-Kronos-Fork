@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"c:\\Users\\van\\source\\repos\\Kronos\\.venv\\Scripts\\python.exe\" *)",
+      "PowerShell(Set-Location \"c:\\Users\\van\\source\\repos\\Kronos\"; & \".\\.venv\\Scripts\\python.exe\" *)",
+      "PowerShell(Set-Location \"c:\\Users\\van\\source\\repos\\Kronos\"; $env:PYTHONUTF8 = \"1\"; & \".\\.venv\\Scripts\\python.exe\" *)",
+      "PowerShell(Set-Location *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(git status *)",
+      "PowerShell(git log *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git remote *)",
+      "PowerShell(git branch *)",
+      "PowerShell(git add *)",
+      "PowerShell(git commit *)",
+      "PowerShell(git push *)"
+    ]
+  }
+}

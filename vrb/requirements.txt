@@ -1,0 +1,4 @@
+# vrb extras on top of the repo root requirements.txt
+pyarrow>=21.0
+scikit-learn>=1.6
+joblib>=1.4
