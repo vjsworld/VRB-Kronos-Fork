@@ -66,6 +66,9 @@ class GammaExplosionTab(QWidget):
         self.reverse_box = QCheckBox("Reverse on opposite signal (stop-and-reverse)")
         self.reverse_box.setChecked(True)
         form.addWidget(self.reverse_box)
+        self.invert_box = QCheckBox("Reverse Entry Sig (buy put on long, call on short)")
+        self.invert_box.setChecked(False)
+        form.addWidget(self.invert_box)
 
         form.addWidget(self._sub("Signal window (CT)"))
         self.entry_box = add("Start time (hr)", QDoubleSpinBox())
@@ -130,6 +133,7 @@ class GammaExplosionTab(QWidget):
             qty=int(self.qty_box.value()),
             min_tte=int(self.mintte_box.value()),
             reverse=self.reverse_box.isChecked(),
+            invert=self.invert_box.isChecked(),
         )
 
     # -------------------------------------------------------------- actions
@@ -148,7 +152,7 @@ class GammaExplosionTab(QWidget):
             atr_period=p["atr_period"], atr_mult=p["atr_mult"],
             target_mult=p["target_mult"], target_delta=p["target_delta"],
             qty=p["qty"], signal_symbol=p["symbol"], min_tte_secs=p["min_tte"],
-            reverse_on_opposite=p["reverse"])
+            reverse_on_opposite=p["reverse"], invert_signals=p["invert"])
 
         self.run_btn.setEnabled(False)
         self.status.setText(f"Running over {len(dates)} days (parallel)...")

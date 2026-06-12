@@ -146,7 +146,8 @@ class LastHourGammaExplosion(Strategy):
     def __init__(self, entry_time="14:00:00", exit_time="15:00:00",
                  atr_period=10, atr_mult=3.0, target_mult=5.0,
                  target_delta=0.20, qty=1, signal_symbol="ES",
-                 min_tte_secs=120, reverse_on_opposite=True):
+                 min_tte_secs=120, reverse_on_opposite=True,
+                 invert_signals=False):
         self.entry_time, self.exit_time = entry_time, exit_time
         self.atr_period, self.atr_mult = int(atr_period), float(atr_mult)
         self.target_mult, self.target_delta = float(target_mult), float(target_delta)
@@ -155,6 +156,10 @@ class LastHourGammaExplosion(Strategy):
         # little time left to buy a meaningful option (delta selection degenerates)
         self.min_tte_secs = int(min_tte_secs)
         self.reverse_on_opposite = bool(reverse_on_opposite)
+        # fade the signal: buy a put on a bullish flip and a call on a bearish
+        # flip (tests the inverse hypothesis). Arrow colors follow the option
+        # actually traded, so a faded bullish signal shows as a red put.
+        self.invert_signals = bool(invert_signals)
 
     def on_day_start(self, engine: Backtest) -> None:
         from ..indicators.supertrend import day_signals
@@ -191,6 +196,8 @@ class LastHourGammaExplosion(Strategy):
         for right in self.by_t.get(t, []):
             if tte < self.min_tte_secs:
                 continue
+            if self.invert_signals:        # fade: buy the opposite right
+                right = PUT if right == CALL else CALL
             # stop-and-reverse: a new signal closes the opposite side at market
             if self.reverse_on_opposite:
                 opp = PUT if right == CALL else CALL
