@@ -13,9 +13,9 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox,
-                             QHBoxLayout, QHeaderView, QLabel, QPushButton,
-                             QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
-                             QVBoxLayout, QWidget)
+                             QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                             QPushButton, QSpinBox, QSplitter, QTableWidget,
+                             QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..backtest.strategies import LastHourGammaExplosion
 from ..data.calendar import common_dates
@@ -76,6 +76,8 @@ class GammaExplosionTab(QWidget):
         self.exit_box = add("End time (hr)", QDoubleSpinBox())
         self.exit_box.setRange(8.5, 15.0); self.exit_box.setValue(15.0); self.exit_box.setSingleStep(0.25)
 
+        self.notes_edit = add("Experiment notes", QLineEdit())
+        self.notes_edit.setPlaceholderText("optional label, recorded to journal")
         self.run_btn = QPushButton("Run Backtest"); self.run_btn.setObjectName("primary")
         self.run_btn.clicked.connect(self.run_backtest)
         form.addWidget(self.run_btn)
@@ -177,10 +179,19 @@ class GammaExplosionTab(QWidget):
         wins = sum(1 for p in payloads for t in p["trades"] if t["reason"] == "target")
         n = sum(p["n_trades"] for p in payloads)
         total = sum(p["pnl"] for p in payloads)
-        self.status.setText(f"Done: {len(payloads)} days, {n} trades, "
-                            f"{wins} hit target. Total ${total:,.2f}")
+        spread = sum(p.get("cost_spread", 0.0) for p in payloads)
+        self.status.setText(f"Done: {len(payloads)} days, {n} trades, {wins} hit target. "
+                            f"Net ${total:,.0f}  (spread cost ${spread:,.0f})")
         self.state.set_results("Last Hour Gamma Explosion", payloads)
         self.populate_days(payloads)
+        # record this experiment to the permanent research journal
+        try:
+            from ..research import registry
+            registry.record("LastHourGammaExplosion", getattr(self, "_active", {}),
+                            self.state.root, [p["date"] for p in payloads], payloads,
+                            notes=self.notes_edit.text().strip())
+        except Exception as e:  # journaling must never break the run
+            print("journal record failed:", e)
 
     def populate_days(self, payloads: list[dict]) -> None:
         self.day_table.setRowCount(len(payloads))

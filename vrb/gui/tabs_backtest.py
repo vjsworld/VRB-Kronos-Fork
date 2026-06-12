@@ -132,6 +132,7 @@ class BacktestTab(QWidget):
             return
         strat_cls, strat_kwargs = self.strategy_spec()
         label = self.strategy_box.currentText()
+        self._active_spec = (strat_cls.__name__, strat_kwargs)
         self.run_btn.setEnabled(False)
         self.status.setText(f"Running {label} over {len(dates)} days (parallel)...")
 
@@ -153,9 +154,17 @@ class BacktestTab(QWidget):
 
     def _finished(self, label: str, payloads: list[dict]) -> None:
         self.run_btn.setEnabled(True)
-        self.status.setText(f"Done: {len(payloads)} days.")
+        total = sum(p["pnl"] for p in payloads)
+        self.status.setText(f"Done: {len(payloads)} days.  Net ${total:,.0f}")
         self.state.set_results(label, payloads)
         self.populate_days(payloads)
+        try:
+            from ..research import registry
+            name, kwargs = getattr(self, "_active_spec", (label, {}))
+            registry.record(name, kwargs, self.state.root,
+                            [p["date"] for p in payloads], payloads)
+        except Exception as e:
+            print("journal record failed:", e)
 
     # -------------------------------------------------------------- results
     def populate_days(self, payloads: list[dict]) -> None:

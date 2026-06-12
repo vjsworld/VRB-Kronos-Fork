@@ -55,6 +55,7 @@ def day_payload(day: ChainDay, result: DayResult) -> dict:
         t["entry_text"] = f"{t['transaction']} {t['legs']} @ {abs(t['entry_value']):.2f}"
         t["exit_text"] = f"{t['reason'].upper()} @ {abs(t['exit_value']):.2f}"
         trades.append(t)
+    costs = _cost_decomposition(day, result)
     return {
         "date": result.date,
         "pnl": result.pnl,
@@ -64,7 +65,37 @@ def day_payload(day: ChainDay, result: DayResult) -> dict:
         "equity_ts": day.ts,
         "equity": result.equity,
         "spot_close": float(day.settlement),
+        # P&L decomposition (dollars): net = gross_mid - spread - commission
+        "gross_mid_pnl": costs["gross_mid"],
+        "cost_spread": costs["spread"],
+        "cost_commission": costs["commission"],
     }
+
+
+def _cost_decomposition(day: ChainDay, result: DayResult) -> dict:
+    """Split realized P&L into the edge at mid vs the bid/ask spread paid vs
+    commission. gross_mid - spread - commission == net pnl. Settlement legs
+    have no spread (cash-settled at intrinsic)."""
+    mult = day.multiplier
+    gross_mid = spread = commission = 0.0
+    for tr in result.trades:
+        commission += tr.entry_costs + tr.exit_costs
+        settled = tr.exit_reason == "settlement"
+        for i, leg in enumerate(tr.legs):
+            entry_mid = float(day.mid[tr.entry_t, leg.k, leg.right])
+            if not np.isfinite(entry_mid):
+                entry_mid = float(tr.entry_prices[i])
+            if settled:
+                exit_mid = float(tr.exit_prices[i])  # intrinsic, no market spread
+            else:
+                exit_mid = float(day.mid[tr.exit_t, leg.k, leg.right])
+                if not np.isfinite(exit_mid):
+                    exit_mid = float(tr.exit_prices[i])
+            leg_mid = leg.qty * (exit_mid - entry_mid) * mult
+            leg_fill = leg.qty * (tr.exit_prices[i] - tr.entry_prices[i]) * mult
+            gross_mid += leg_mid
+            spread += leg_mid - leg_fill  # edge given up to the spread (>=0 typ.)
+    return {"gross_mid": gross_mid, "spread": spread, "commission": commission}
 
 
 def run_backtest_days(dates: list[str], strategy_factory, root: str,
