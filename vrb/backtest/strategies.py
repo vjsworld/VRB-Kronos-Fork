@@ -258,7 +258,15 @@ class SuperTrendCreditSpread(TimedExitMixin, Strategy):
                 trade.signal_direction = "buy" if bullish else "sell"
 
         for tr in list(engine.open_trades):
-            self.manage(engine, t, tr, self.t_exit)
+            if self.reverse_on_opposite:
+                # pure stop-and-reverse: hold each spread until the opposite
+                # flip (handled above) or the exit time / 15:00 settlement —
+                # no early profit-target or stop exits, so we are always in a
+                # position and reverse on every SuperTrend flip.
+                if t >= self.t_exit:
+                    engine.close(t, tr, "time")
+            else:
+                self.manage(engine, t, tr, self.t_exit)
 
 
 class LastHourGammaExplosion(Strategy):

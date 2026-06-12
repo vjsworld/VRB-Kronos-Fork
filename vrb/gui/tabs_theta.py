@@ -28,7 +28,9 @@ from . import theme
 from .charts import SignalChart
 from .workers import FnWorker, supertrend_for_day
 
-PREMIUM_COLOR = "#ffca28"  # gold: the credit we're harvesting
+PREMIUM_COLOR = "#ffca28"  # gold: non-directional credit (condor/strangle)
+VBP_COLOR = "#2979ff"      # VBP — bull put credit spread (bullish, blue)
+VBC_COLOR = "#ff3df5"      # VBC — bear call credit spread (bearish, magenta)
 
 
 class ThetaHarvestTab(QWidget):
@@ -251,15 +253,20 @@ class ThetaHarvestTab(QWidget):
         self.chart.add_supertrend(st["ts"], st["st"], st["direction"])
         self.chart.add_overlay_line(day.ts, day.spot, theme.FG, width=1.5, name="SPX")
 
-        # structure buyback cost (decaying credit) on the right axis + the tent
-        pos_prem = np.full(len(day.ts), np.nan)
+        # structure buyback cost (decaying credit) on the right axis + the tent.
+        # Credit spreads are color/label coded: bull put = VBP (blue), bear
+        # call = VBC (magenta); non-directional structures stay gold.
+        n = len(day.ts)
+        vbp = np.full(n, np.nan)   # bull put credit spread
+        vbc = np.full(n, np.nan)   # bear call credit spread
+        gold = np.full(n, np.nan)  # iron condor / strangle
         markers, segments = [], []
         for t in p["trades"]:
             legs = t.get("legs_detail") or []
             if not legs:
                 continue
-            i0 = int(np.clip(np.searchsorted(day.ts, np.datetime64(t["entry_ts"], "s")), 0, len(day.ts) - 1))
-            i1 = int(np.clip(np.searchsorted(day.ts, np.datetime64(t["exit_ts"], "s")), 0, len(day.ts) - 1))
+            i0 = int(np.clip(np.searchsorted(day.ts, np.datetime64(t["entry_ts"], "s")), 0, n - 1))
+            i1 = int(np.clip(np.searchsorted(day.ts, np.datetime64(t["exit_ts"], "s")), 0, n - 1))
             buyback = np.zeros(i1 - i0 + 1)
             for leg in legs:
                 k = day.k_index(leg["strike"])
@@ -267,10 +274,17 @@ class ThetaHarvestTab(QWidget):
                 buyback += -leg["qty"] * np.nan_to_num(seg, nan=0.0)
                 if leg["qty"] < 0:  # short strikes form the tent
                     segments.append((t["entry_ts"], t["exit_ts"], leg["strike"], theme.FG_DIM))
-            pos_prem[i0:i1 + 1] = buyback
+            label = t.get("label", "")
+            if label == "bear_call":
+                vbc[i0:i1 + 1] = buyback; mcolor, tag = VBC_COLOR, "VBC"
+            elif label == "bull_put":
+                vbp[i0:i1 + 1] = buyback; mcolor, tag = VBP_COLOR, "VBP"
+            else:
+                gold[i0:i1 + 1] = buyback; mcolor, tag = PREMIUM_COLOR, "SELL"
+            t["_tag"] = tag
             markers.append({"x": t["entry_ts"], "y": float(buyback[0]), "kind": "entry",
-                            "color": PREMIUM_COLOR,
-                            "text": f"SELL @ {abs(t['entry_value']):.2f}"})
+                            "color": mcolor,
+                            "text": f"{tag} @ {abs(t['entry_value']):.2f}"})
             pnl = t["pnl"]
             markers.append({"x": t["exit_ts"], "y": float(buyback[-1]), "kind": "exit",
                             "color": theme.EXIT,
@@ -278,17 +292,27 @@ class ThetaHarvestTab(QWidget):
                             "label_color": theme.WIN if pnl >= 0 else theme.LOSS})
 
         self.chart.add_strike_segments(segments)
-        self.chart.set_premium(day.ts, pos_prem, None, color_a=PREMIUM_COLOR,
-                               label="Structure buyback cost (pts)")
+        is_credit = np.isfinite(vbp).any() or np.isfinite(vbc).any()
+        if is_credit:
+            self.chart.set_premium(day.ts, vbp, vbc, color_a=VBP_COLOR, color_b=VBC_COLOR,
+                                   label="Credit spread buyback (pts)  VBP=blue VBC=magenta")
+        else:
+            self.chart.set_premium(day.ts, gold, None, color_a=PREMIUM_COLOR,
+                                   label="Structure buyback cost (pts)")
         self.chart.add_premium_markers_xy(markers)
         self.chart.set_equity(p["equity_ts"][::6], p["equity"][::6])
 
         self.trade_table.setRowCount(len(p["trades"]))
+        tag_color = {"VBP": VBP_COLOR, "VBC": VBC_COLOR}
         for r, t in enumerate(p["trades"]):
-            vals = [str(t["entry_ts"])[11:], str(t["exit_ts"])[11:], t["legs"],
+            tag = t.get("_tag", "")
+            structure = f"{tag}  {t['legs']}" if tag in ("VBP", "VBC") else t["legs"]
+            vals = [str(t["entry_ts"])[11:], str(t["exit_ts"])[11:], structure,
                     f"{abs(t['entry_value']):.2f}", t["reason"], f"{t['pnl']:,.2f}"]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
-                if c == 5:
+                if c == 2 and tag in tag_color:
+                    it.setForeground(QColor(tag_color[tag]))
+                elif c == 5:
                     it.setForeground(QColor(theme.WIN if t["pnl"] >= 0 else theme.LOSS))
                 self.trade_table.setItem(r, c, it)
