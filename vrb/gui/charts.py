@@ -56,9 +56,10 @@ class CandlestickItem(pg.GraphicsObject):
         painter.drawPicture(0, 0, self.picture)
 
     def boundingRect(self):
-        if len(self.t) == 0:
+        finite = np.isfinite(self.l) & np.isfinite(self.h)
+        if len(self.t) == 0 or not finite.any():
             return pg.QtCore.QRectF()
-        lo = float(np.nanmin(self.l)); hi = float(np.nanmax(self.h))
+        lo = float(np.nanmin(self.l[finite])); hi = float(np.nanmax(self.h[finite]))
         return pg.QtCore.QRectF(float(self.t[0]) - self.width, lo,
                                 float(self.t[-1] - self.t[0]) + 2 * self.width, hi - lo)
 
@@ -135,9 +136,11 @@ class SignalChart(pg.GraphicsLayoutWidget):
     def add_trade_markers(self, trades: list[dict]) -> None:
         """trades: dicts with entry_ts, exit_ts (datetime64), direction
         ('buy'|'sell'), label, entry_text, exit_text, pnl."""
-        if self._bar_data is None:
+        if self._bar_data is None or len(self._bar_data[0]) == 0:
             return
         t_arr, _o, h_arr, l_arr, _c = self._bar_data
+        if not (np.isfinite(h_arr).any() and np.isfinite(l_arr).any()):
+            return
         span = max(float(np.nanmax(h_arr) - np.nanmin(l_arr)), 1e-9)
         off = span * 0.04
 

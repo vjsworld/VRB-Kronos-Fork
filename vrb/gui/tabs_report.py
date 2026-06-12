@@ -71,12 +71,16 @@ class ReportTab(QWidget):
                 self.table.setSpan(r, 0, 1, 4)
                 continue
             self.table.setItem(r, 0, QTableWidgetItem("    " + label))
+            # rows that represent capital, not P&L, shouldn't be green/red
+            neutral = "Account Size" in label
             for c, v in ((1, va), (2, vb), (3, vs)):
                 it = QTableWidgetItem(v)
                 it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                if v.startswith("($") or v.startswith("-"):
+                if neutral or v in ("n/a", "", "$0.00"):
+                    pass
+                elif v.startswith("($") or v.startswith("-"):
                     it.setForeground(QColor(theme.LOSS))
-                elif v.startswith("$") and v not in ("$0.00",):
+                elif v.startswith("$"):
                     it.setForeground(QColor(theme.WIN))
                 self.table.setItem(r, c, it)
 

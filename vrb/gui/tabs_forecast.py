@@ -50,7 +50,9 @@ class ForecastTab(QWidget):
         h.addWidget(self.paths_box)
 
         h.addWidget(QLabel("Context"))
-        self.symbol_box = QComboBox(); self.symbol_box.addItems(["ES", "NQ", "SPX", "NDX"])
+        # Only futures carry the overnight session needed for the 400-bar
+        # lookback; cash indices (~390 RTH bars) can't satisfy it before ~15:00.
+        self.symbol_box = QComboBox(); self.symbol_box.addItems(["ES", "NQ"])
         h.addWidget(self.symbol_box)
 
         self.run_btn = QPushButton("Forecast"); self.run_btn.setObjectName("primary")

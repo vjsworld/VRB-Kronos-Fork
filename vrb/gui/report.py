@@ -14,6 +14,8 @@ SECONDS_PER_DAY_SESSION = 6.5 * 3600  # 08:30-15:00 CT
 
 
 def _fmt_money(v: float) -> str:
+    if not np.isfinite(v):
+        return "n/a"
     return f"(${abs(v):,.2f})" if v < 0 else f"${v:,.2f}"
 
 

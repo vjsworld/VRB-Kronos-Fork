@@ -60,3 +60,15 @@ class MainWindow(QMainWindow):
         self.report_tab.refresh()
         self.statusBar().showMessage(
             f"{self.state.strategy_label}: {len(self.state.payloads)} days loaded")
+
+    def closeEvent(self, event) -> None:
+        """Join any in-flight worker thread before teardown so Qt never
+        destroys a running QThread (which would abort the process)."""
+        for tab in (self.backtest_tab, self.report_tab,
+                    self.forecast_tab, self.mllab_tab):
+            w = getattr(tab, "worker", None)
+            if w is not None and w.isRunning():
+                w.requestInterruption()
+                w.quit()
+                w.wait(5000)
+        super().closeEvent(event)
