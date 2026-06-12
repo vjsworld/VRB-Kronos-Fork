@@ -172,6 +172,95 @@ class ShortStrangle(TimedExitMixin, Strategy):
             self.done = True
 
 
+class SuperTrendCreditSpread(TimedExitMixin, Strategy):
+    """SuperTrend signal -> directional 0DTE credit spread (defined risk).
+
+    A bullish flip sells a **bull put credit spread** (sell a ~short_delta put,
+    buy a put wing_pts lower) — it profits if price holds above the short put.
+    A bearish flip sells a **bear call credit spread** (sell a ~short_delta
+    call, buy a call wing_pts higher) — it profits if price stays below the
+    short call. So we collect theta in the direction the trend says is safe.
+
+    Managed like the other premium sellers: take profit at profit_frac of the
+    credit, stop at stop_mult x credit, optionally reverse the spread on an
+    opposite signal, else hold to 15:00 settlement. Two legs, so far less
+    spread drag than an iron condor.
+    """
+
+    def __init__(self, entry_time="10:00:00", exit_time="15:00:00",
+                 atr_period=10, atr_mult=3.0, short_delta=0.20, wing_pts=25.0,
+                 stop_mult=2.0, profit_frac=0.5, qty=1, signal_symbol="ES",
+                 min_tte_secs=120, reverse_on_opposite=True):
+        self.entry_time, self.exit_time = entry_time, exit_time
+        self.atr_period, self.atr_mult = int(atr_period), float(atr_mult)
+        self.short_delta, self.wing_pts = float(short_delta), float(wing_pts)
+        self.stop_mult, self.profit_frac, self.qty = stop_mult, profit_frac, int(qty)
+        self.signal_symbol = signal_symbol
+        self.min_tte_secs = int(min_tte_secs)
+        self.reverse_on_opposite = bool(reverse_on_opposite)
+
+    def on_day_start(self, engine: Backtest) -> None:
+        from ..indicators.supertrend import day_signals
+        day = engine.day
+        self.by_t: dict[int, list[int]] = {}
+        self.t_exit = day.t_index(self.exit_time)
+        try:
+            sig = day_signals(day.date, self.signal_symbol, self.atr_period,
+                              self.atr_mult, self.entry_time, self.exit_time)
+        except FileNotFoundError:
+            return
+        for ts, right in sig["events"]:
+            gt = int(np.searchsorted(day.ts, ts))
+            if 0 <= gt < len(day.ts):
+                self.by_t.setdefault(gt, []).append(right)
+
+    def _bull_put_spread(self, day, t: int) -> list[Leg] | None:
+        put_d = np.abs(day.greeks_at(t)["delta"][:, PUT])
+        valid = (np.isfinite(put_d) & (day.strikes < day.spot[t]) & (day.bid[t, :, PUT] > 0))
+        if not valid.any():
+            return None
+        ks = int(np.argmin(np.where(valid, np.abs(put_d - self.short_delta), np.inf)))
+        kl = int(np.searchsorted(day.strikes, day.strikes[ks] - self.wing_pts, side="right")) - 1
+        if kl < 0 or kl >= ks:
+            return None
+        q = self.qty
+        return [Leg(ks, PUT, -q), Leg(kl, PUT, q)]   # short put + long lower put
+
+    def _bear_call_spread(self, day, t: int) -> list[Leg] | None:
+        call_d = day.greeks_at(t)["delta"][:, CALL]
+        valid = (np.isfinite(call_d) & (day.strikes > day.spot[t]) & (day.bid[t, :, CALL] > 0))
+        if not valid.any():
+            return None
+        ks = int(np.argmin(np.where(valid, np.abs(call_d - self.short_delta), np.inf)))
+        kl = int(np.searchsorted(day.strikes, day.strikes[ks] + self.wing_pts))
+        if kl >= len(day.strikes) or kl <= ks:
+            return None
+        q = self.qty
+        return [Leg(ks, CALL, -q), Leg(kl, CALL, q)]  # short call + long higher call
+
+    def on_snapshot(self, engine: Backtest, t: int) -> None:
+        day = engine.day
+        tte = (day.expiry - day.ts[t]) / np.timedelta64(1, "s")
+        for right in self.by_t.get(t, []):
+            if tte < self.min_tte_secs:
+                continue
+            bullish = right == CALL  # CALL signal == bullish SuperTrend flip
+            if self.reverse_on_opposite:
+                for tr in list(engine.open_trades):
+                    tr_bullish = tr.legs[0].right == PUT  # bull put spread is short a PUT
+                    if tr_bullish != bullish:
+                        engine.close(t, tr, "reverse")
+            legs = self._bull_put_spread(day, t) if bullish else self._bear_call_spread(day, t)
+            if legs is None:
+                continue
+            trade = engine.open(t, legs, "bull_put" if bullish else "bear_call")
+            if trade is not None:
+                trade.signal_direction = "buy" if bullish else "sell"
+
+        for tr in list(engine.open_trades):
+            self.manage(engine, t, tr, self.t_exit)
+
+
 class LastHourGammaExplosion(Strategy):
     """Buy 0DTE options on SuperTrend reversals; ride to a profit multiple or expiry.
 

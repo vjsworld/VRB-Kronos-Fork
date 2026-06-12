@@ -15,12 +15,13 @@ from __future__ import annotations
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import (QComboBox, QDoubleSpinBox, QGroupBox, QHBoxLayout,
-                             QHeaderView, QLabel, QLineEdit, QPushButton,
-                             QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox,
+                             QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                             QPushButton, QSpinBox, QSplitter, QTableWidget,
+                             QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..backtest.strategies import IronCondor, ShortStrangle
+from ..backtest.strategies import (IronCondor, ShortStrangle,
+                                    SuperTrendCreditSpread)
 from ..data.calendar import common_dates
 from ..data.theta import CALL
 from . import theme
@@ -52,11 +53,21 @@ class ThetaHarvestTab(QWidget):
             return widget
 
         self.structure_box = add("Structure", QComboBox())
-        self.structure_box.addItems(["Iron Condor", "Short Strangle"])
-        self.structure_box.currentTextChanged.connect(self._toggle_wing)
-        self.symbol_box = add("Context chart", QComboBox()); self.symbol_box.addItems(["ES", "NQ"])
+        self.structure_box.addItems(["Iron Condor", "Short Strangle",
+                                     "SuperTrend Credit Spread"])
+        self.structure_box.currentTextChanged.connect(self._toggle_structure)
+        self.symbol_box = add("Signal / context chart", QComboBox()); self.symbol_box.addItems(["ES", "NQ"])
         self.days_box = add("Days (recent)", QSpinBox())
         self.days_box.setRange(2, 600); self.days_box.setValue(60)
+
+        self.st_header = self._sub("SuperTrend signal")
+        form.addWidget(self.st_header)
+        self.atr_period_box = add("ATR period", QSpinBox())
+        self.atr_period_box.setRange(2, 100); self.atr_period_box.setValue(10)
+        self.atr_mult_box = add("ATR multiplier", QDoubleSpinBox())
+        self.atr_mult_box.setRange(0.5, 15.0); self.atr_mult_box.setValue(3.0); self.atr_mult_box.setSingleStep(0.5)
+        self.reverse_box = QCheckBox("Reverse on opposite signal")
+        self.reverse_box.setChecked(True); form.addWidget(self.reverse_box)
 
         form.addWidget(self._sub("Structure"))
         self.delta_box = add("Short delta", QDoubleSpinBox())
@@ -112,14 +123,21 @@ class ThetaHarvestTab(QWidget):
 
         split.addWidget(left); split.addWidget(right)
         split.setSizes([360, 1080])
-        self._toggle_wing(self.structure_box.currentText())
+        self._toggle_structure(self.structure_box.currentText())
 
     def _sub(self, text: str) -> QLabel:
         lbl = QLabel(text); lbl.setStyleSheet(f"color:{theme.ACCENT}; font-weight:700; margin-top:4px;")
         return lbl
 
-    def _toggle_wing(self, structure: str) -> None:
-        self.wing_box.setEnabled(structure == "Iron Condor")
+    def _toggle_structure(self, structure: str) -> None:
+        is_credit = structure == "SuperTrend Credit Spread"
+        # SuperTrend signal controls only apply to the credit-spread structure
+        self.st_header.setVisible(is_credit)
+        self.atr_period_box.parent().setVisible(is_credit)
+        self.atr_mult_box.parent().setVisible(is_credit)
+        self.reverse_box.setVisible(is_credit)
+        # wings apply to condor and credit spread, not the naked strangle
+        self.wing_box.setEnabled(structure != "Short Strangle")
 
     # ------------------------------------------------------------- helpers
     def _hhmmss(self, hr: float) -> str:
@@ -132,10 +150,18 @@ class ThetaHarvestTab(QWidget):
         entry, exit_ = self._hhmmss(self.entry_box.value()), self._hhmmss(self.exit_box.value())
         delta, qty = self.delta_box.value(), int(self.qty_box.value())
         stop, profit = self.stop_box.value(), self.profit_box.value()
-        if self.structure_box.currentText() == "Iron Condor":
+        structure = self.structure_box.currentText()
+        if structure == "Iron Condor":
             return IronCondor, dict(entry_time=entry, exit_time=exit_, target_delta=delta,
                                     wing_pts=self.wing_box.value(), stop_mult=stop,
                                     profit_frac=profit, qty=qty)
+        if structure == "SuperTrend Credit Spread":
+            return SuperTrendCreditSpread, dict(
+                entry_time=entry, exit_time=exit_, atr_period=int(self.atr_period_box.value()),
+                atr_mult=float(self.atr_mult_box.value()), short_delta=delta,
+                wing_pts=self.wing_box.value(), stop_mult=stop, profit_frac=profit,
+                qty=qty, signal_symbol=self.symbol_box.currentText(),
+                reverse_on_opposite=self.reverse_box.isChecked())
         return ShortStrangle, dict(entry_time=entry, exit_time=exit_, target_delta=delta,
                                    stop_mult=stop, profit_frac=profit, qty=qty)
 
