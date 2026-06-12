@@ -26,7 +26,7 @@ from ..data.calendar import common_dates
 from ..data.theta import CALL
 from . import theme
 from .charts import SignalChart
-from .workers import FnWorker, rth_candles
+from .workers import FnWorker, supertrend_for_day
 
 PREMIUM_COLOR = "#ffca28"  # gold: the credit we're harvesting
 
@@ -239,13 +239,16 @@ class ThetaHarvestTab(QWidget):
             f"{self.structure_box.currentText()} — {date[:4]}-{date[4:6]}-{date[6:]} — "
             f"P&L ${p['pnl']:,.2f} — {p['n_trades']} trades")
         try:
-            candles = rth_candles(date, sym)
+            st = supertrend_for_day(date, sym, int(self.atr_period_box.value()),
+                                    float(self.atr_mult_box.value()),
+                                    self._hhmmss(self.entry_box.value()),
+                                    self._hhmmss(self.exit_box.value()))
             day = ChainDay.load(date, self.state.root)
         except (FileNotFoundError, ValueError):
             self.chart_title.setText(f"{date}: missing data")
             return
-        self.chart.set_candles(candles["ts"], candles["open"], candles["high"],
-                               candles["low"], candles["close"])
+        self.chart.set_candles(st["ts"], st["open"], st["high"], st["low"], st["close"])
+        self.chart.add_supertrend(st["ts"], st["st"], st["direction"])
         self.chart.add_overlay_line(day.ts, day.spot, theme.FG, width=1.5, name="SPX")
 
         # structure buyback cost (decaying credit) on the right axis + the tent
