@@ -78,10 +78,16 @@ class ChainDay:
         m = 0.5 * (b + a)
         return np.where((a > 0) & (b >= 0), m, np.nan)
 
-    def t_index(self, hhmmss: str) -> int:
-        """Grid index of the first snapshot at/after a CT wall-clock time."""
+    def t_index(self, hhmmss: str, clamp: bool = True) -> int:
+        """Grid index of the first snapshot at/after a CT wall-clock time.
+
+        On early-close days the grid ends before 15:00; with clamp (default)
+        a time past the last snapshot maps to the final grid index instead of
+        the out-of-range len(ts). Pass clamp=False for exclusive range bounds.
+        """
         iso = f"{self.date[:4]}-{self.date[4:6]}-{self.date[6:]}T{hhmmss}"
-        return int(np.searchsorted(self.ts, np.datetime64(iso, "s")))
+        i = int(np.searchsorted(self.ts, np.datetime64(iso, "s")))
+        return min(i, len(self.ts) - 1) if clamp else i
 
     def k_index(self, strike: float) -> int:
         i = int(np.searchsorted(self.strikes, strike))
