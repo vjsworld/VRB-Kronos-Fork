@@ -213,6 +213,11 @@ class GammaExplosionTab(QWidget):
             return
         self.chart.set_candles(st["ts"], st["open"], st["high"], st["low"], st["close"])
         self.chart.add_supertrend(st["ts"], st["st"], st["direction"])
+
+        # SPX cash line (left axis) + held-option premium (right axis), both
+        # reconstructed from the option ChainDay for this date
+        self._overlay_underlying_and_premium(date, p)
+
         self.chart.set_equity(p["equity_ts"][::6], p["equity"][::6])
         self.chart.add_trade_markers(p["trades"])
 
@@ -228,3 +233,30 @@ class GammaExplosionTab(QWidget):
                 elif c == 5:
                     it.setForeground(QColor(theme.WIN if t["pnl"] >= 0 else theme.LOSS))
                 self.trade_table.setItem(r, c, it)
+
+    def _overlay_underlying_and_premium(self, date: str, p: dict) -> None:
+        """Add SPX cash as a left-axis line and the held-option premium on the
+        right axis (call premium while long a call, put premium while long a put)."""
+        from ..options.chain import CALL, ChainDay
+        try:
+            day = ChainDay.load(date, self.state.root)
+        except (FileNotFoundError, ValueError):
+            return
+        # SPX cash line on the left axis (what the options actually settle to)
+        self.chart.add_overlay_line(day.ts, day.spot, theme.FG, width=1.5, name="SPX")
+
+        # premium of whichever option is held, switching call<->put with position
+        call_prem = np.full(len(day.ts), np.nan)
+        put_prem = np.full(len(day.ts), np.nan)
+        for t in p["trades"]:
+            for leg in (t.get("legs_detail") or []):
+                k = day.k_index(leg["strike"])
+                right = leg["right"]
+                i0 = int(np.searchsorted(day.ts, np.datetime64(t["entry_ts"], "s")))
+                i1 = int(np.searchsorted(day.ts, np.datetime64(t["exit_ts"], "s")))
+                i0 = max(0, min(i0, len(day.ts) - 1))
+                i1 = max(i0, min(i1, len(day.ts) - 1))
+                seg = day.mid[i0:i1 + 1, k, right]
+                target = call_prem if right == CALL else put_prem
+                target[i0:i1 + 1] = seg
+        self.chart.set_premium(day.ts, call_prem, put_prem)

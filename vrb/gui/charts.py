@@ -95,10 +95,30 @@ class SignalChart(pg.GraphicsLayoutWidget):
                                      rateLimit=30, slot=self._mouse_moved)
         self._candles: CandlestickItem | None = None
         self._bar_data = None
+        self.premium_vb = None  # lazily-created right-axis viewbox for premium
+
+    # --------------------------------------------------- right-axis premium VB
+    def _ensure_premium_vb(self) -> None:
+        if self.premium_vb is not None:
+            return
+        self.premium_vb = pg.ViewBox()
+        self.price_plot.showAxis("right")
+        self.price_plot.getAxis("right").setLabel("Held option premium (pts)")
+        self.price_plot.scene().addItem(self.premium_vb)
+        self.price_plot.getAxis("right").linkToView(self.premium_vb)
+        self.premium_vb.setXLink(self.price_plot)
+        self.price_plot.vb.sigResized.connect(self._sync_premium_vb)
+        self._sync_premium_vb()
+
+    def _sync_premium_vb(self) -> None:
+        if self.premium_vb is not None:
+            self.premium_vb.setGeometry(self.price_plot.vb.sceneBoundingRect())
 
     # ------------------------------------------------------------------ data
     def set_candles(self, ts: np.ndarray, o, h, l, c, bar_secs: int = 60) -> None:
         self.price_plot.clear()
+        if self.premium_vb is not None:
+            self.premium_vb.clear()
         self.price_plot.addItem(self._crosshair_v, ignoreBounds=True)
         self.price_plot.addItem(self._crosshair_h, ignoreBounds=True)
         t = to_epoch(ts)
@@ -109,6 +129,37 @@ class SignalChart(pg.GraphicsLayoutWidget):
         self._bar_data = (t, np.asarray(o, float), np.asarray(h, float),
                           np.asarray(l, float), np.asarray(c, float))
         self.price_plot.autoRange()
+
+    def add_overlay_line(self, ts: np.ndarray, values: np.ndarray, color: str,
+                         width: float = 1.5, name: str = "") -> None:
+        """Plot a line on the LEFT (price) axis, e.g. the SPX cash index."""
+        self.price_plot.plot(to_epoch(ts), np.asarray(values, float),
+                             pen=pg.mkPen(color, width=width), connect="finite",
+                             name=name or None)
+        self.price_plot.autoRange()  # re-include the overlay in the view
+
+    def set_premium(self, ts: np.ndarray, call_prem: np.ndarray,
+                    put_prem: np.ndarray) -> None:
+        """Plot the held-option premium on the RIGHT axis — call segments blue,
+        put segments red (matching the entry-arrow colors). NaN where flat."""
+        self._ensure_premium_vb()
+        self.premium_vb.clear()
+        t = to_epoch(ts)
+        call_prem = np.asarray(call_prem, float)
+        put_prem = np.asarray(put_prem, float)
+        if np.isfinite(call_prem).any():
+            self.premium_vb.addItem(pg.PlotCurveItem(
+                t, call_prem, pen=pg.mkPen(theme.BUY, width=2), connect="finite"))
+        if np.isfinite(put_prem).any():
+            self.premium_vb.addItem(pg.PlotCurveItem(
+                t, put_prem, pen=pg.mkPen(theme.SELL, width=2), connect="finite"))
+        allp = np.concatenate([call_prem[np.isfinite(call_prem)],
+                               put_prem[np.isfinite(put_prem)]])
+        if allp.size:
+            lo, hi = float(allp.min()), float(allp.max())
+            pad = max((hi - lo) * 0.15, 0.5)
+            self.premium_vb.setYRange(max(0.0, lo - pad), hi + pad)
+        self._sync_premium_vb()
 
     def add_supertrend(self, ts: np.ndarray, st_line: np.ndarray,
                        direction: np.ndarray) -> None:

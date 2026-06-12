@@ -23,6 +23,8 @@ def legs_text(day: ChainDay, trade: Trade) -> str:
 def trade_payload(day: ChainDay, trade: Trade) -> dict:
     exit_value = float(np.sum(
         np.array([l.qty for l in trade.legs], np.float64) * trade.exit_prices))
+    legs_detail = [{"strike": float(day.strikes[l.k]), "right": int(l.right),
+                    "qty": int(l.qty)} for l in trade.legs]
     debit = trade.entry_value > 0
     # transaction = what we actually did (debit=BUY, credit=SELL);
     # direction = market view for the arrow color (may differ, e.g. long put).
@@ -40,6 +42,7 @@ def trade_payload(day: ChainDay, trade: Trade) -> dict:
         "contracts": int(sum(abs(l.qty) for l in trade.legs)),
         "direction": direction,
         "transaction": transaction,
+        "legs_detail": legs_detail,
         "entry_text": "",
         "exit_text": "",
     }
