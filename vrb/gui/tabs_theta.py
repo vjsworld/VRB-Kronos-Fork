@@ -84,6 +84,14 @@ class ThetaHarvestTab(QWidget):
         self.stop_box = add("Stop (x credit)", QDoubleSpinBox())
         self.stop_box.setRange(1.1, 10.0); self.stop_box.setValue(2.0); self.stop_box.setSingleStep(0.5)
 
+        form.addWidget(self._sub("Execution & filters"))
+        self.fill_box = add("Fill quality (0=cross spread, 1=mid)", QDoubleSpinBox())
+        self.fill_box.setRange(0.0, 1.0); self.fill_box.setValue(0.0); self.fill_box.setSingleStep(0.1)
+        self.ivrv_box = add("Min IV/RV to sell (0=off)", QDoubleSpinBox())
+        self.ivrv_box.setRange(0.0, 3.0); self.ivrv_box.setValue(0.0); self.ivrv_box.setSingleStep(0.05)
+        self.rvwin_box = add("RV window (min)", QSpinBox())
+        self.rvwin_box.setRange(5, 120); self.rvwin_box.setValue(30); self.rvwin_box.setSingleStep(5)
+
         form.addWidget(self._sub("Entry window (CT)"))
         self.entry_box = add("Entry time (hr)", QDoubleSpinBox())
         self.entry_box.setRange(8.5, 14.5); self.entry_box.setValue(10.0); self.entry_box.setSingleStep(0.25)
@@ -152,20 +160,25 @@ class ThetaHarvestTab(QWidget):
         entry, exit_ = self._hhmmss(self.entry_box.value()), self._hhmmss(self.exit_box.value())
         delta, qty = self.delta_box.value(), int(self.qty_box.value())
         stop, profit = self.stop_box.value(), self.profit_box.value()
+        vol = dict(min_iv_rv=float(self.ivrv_box.value()), rv_window_min=int(self.rvwin_box.value()))
         structure = self.structure_box.currentText()
         if structure == "Iron Condor":
             return IronCondor, dict(entry_time=entry, exit_time=exit_, target_delta=delta,
                                     wing_pts=self.wing_box.value(), stop_mult=stop,
-                                    profit_frac=profit, qty=qty)
+                                    profit_frac=profit, qty=qty, **vol)
         if structure == "SuperTrend Credit Spread":
             return SuperTrendCreditSpread, dict(
                 entry_time=entry, exit_time=exit_, atr_period=int(self.atr_period_box.value()),
                 atr_mult=float(self.atr_mult_box.value()), short_delta=delta,
                 wing_pts=self.wing_box.value(), stop_mult=stop, profit_frac=profit,
                 qty=qty, signal_symbol=self.symbol_box.currentText(),
-                reverse_on_opposite=self.reverse_box.isChecked())
+                reverse_on_opposite=self.reverse_box.isChecked(), **vol)
         return ShortStrangle, dict(entry_time=entry, exit_time=exit_, target_delta=delta,
-                                   stop_mult=stop, profit_frac=profit, qty=qty)
+                                   stop_mult=stop, profit_frac=profit, qty=qty, **vol)
+
+    def _engine_kwargs(self) -> dict:
+        # fill quality maps to the engine's spread-improvement (0=cross, 1=mid)
+        return {"improvement": float(self.fill_box.value())}
 
     # -------------------------------------------------------------- actions
     def run_backtest(self) -> None:
@@ -181,13 +194,17 @@ class ThetaHarvestTab(QWidget):
         self.run_btn.setEnabled(False)
         self.status.setText(f"Running {label} over {len(dates)} days (parallel)...")
 
+        engine_kwargs = self._engine_kwargs()
+
         def job(progress_cb):
             from ..backtest.parallel import run_days_parallel
-            return run_days_parallel(dates, cls, kwargs, self.state.root, progress_cb=progress_cb)
+            return run_days_parallel(dates, cls, kwargs, self.state.root,
+                                     engine_kwargs=engine_kwargs, progress_cb=progress_cb)
 
+        record_params = {**kwargs, "fill_quality": engine_kwargs["improvement"]}
         self.worker = FnWorker(job)
         self.worker.progress.connect(self.status.setText)
-        self.worker.done.connect(lambda pls: self._finished(cls.__name__, kwargs, pls))
+        self.worker.done.connect(lambda pls: self._finished(cls.__name__, record_params, pls))
         self.worker.failed.connect(self._failed)
         self.worker.start()
 

@@ -8,8 +8,35 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..options import bs
 from ..options.chain import CALL, PUT
 from .engine import Backtest, Leg, Trade
+
+
+def trailing_rv(day, t: int, window_secs: int, grid_secs: int = 5) -> float:
+    """Annualized realized vol of the underlying over the trailing window,
+    measured from the spot series on the option grid (calendar annualization,
+    so it's directly comparable to ATM IV)."""
+    n = max(2, window_secs // grid_secs)
+    s = day.spot[max(0, t - n):t + 1]
+    s = s[np.isfinite(s)]
+    if len(s) < 10:
+        return np.nan
+    r = np.diff(np.log(s))
+    sd = float(r.std())
+    return sd * np.sqrt(bs.SECONDS_PER_YEAR / grid_secs) if sd > 0 else np.nan
+
+
+def vol_rich_enough(day, t: int, min_iv_rv: float, rv_window_min: float) -> bool:
+    """True if ATM IV is at least min_iv_rv x the trailing realized vol — i.e.
+    premium is rich enough to sell. min_iv_rv <= 0 disables the filter."""
+    if min_iv_rv <= 0:
+        return True
+    rv = trailing_rv(day, t, int(rv_window_min) * 60)
+    iv = day.atm_iv(t)
+    if not (np.isfinite(rv) and rv > 0 and np.isfinite(iv)):
+        return True  # can't measure -> don't block the trade
+    return (iv / rv) >= min_iv_rv
 
 
 class Strategy:
@@ -79,10 +106,11 @@ class IronCondor(TimedExitMixin, Strategy):
 
     def __init__(self, entry_time="09:00:00", exit_time="14:45:00",
                  target_delta=0.16, wing_pts=25.0, stop_mult=2.0,
-                 profit_frac=0.5, qty=1):
+                 profit_frac=0.5, qty=1, min_iv_rv=0.0, rv_window_min=30):
         self.entry_time, self.exit_time = entry_time, exit_time
         self.target_delta, self.wing_pts = target_delta, wing_pts
         self.stop_mult, self.profit_frac, self.qty = stop_mult, profit_frac, qty
+        self.min_iv_rv, self.rv_window_min = float(min_iv_rv), float(rv_window_min)
 
     def on_day_start(self, engine: Backtest) -> None:
         self.t_entry = engine.day.t_index(self.entry_time)
@@ -92,6 +120,8 @@ class IronCondor(TimedExitMixin, Strategy):
 
     def _pick_legs(self, engine: Backtest, t: int) -> list[Leg] | None:
         day = engine.day
+        if not vol_rich_enough(day, t, self.min_iv_rv, self.rv_window_min):
+            return None  # premium not rich enough today
         g = day.greeks_at(t)
         delta = g["delta"]                       # (K, 2)
         call_d, put_d = delta[:, CALL], np.abs(delta[:, PUT])
@@ -133,10 +163,12 @@ class ShortStrangle(TimedExitMixin, Strategy):
     """
 
     def __init__(self, entry_time="10:00:00", exit_time="15:00:00",
-                 target_delta=0.16, stop_mult=2.0, profit_frac=0.5, qty=1):
+                 target_delta=0.16, stop_mult=2.0, profit_frac=0.5, qty=1,
+                 min_iv_rv=0.0, rv_window_min=30):
         self.entry_time, self.exit_time = entry_time, exit_time
         self.target_delta = target_delta
         self.stop_mult, self.profit_frac, self.qty = stop_mult, profit_frac, qty
+        self.min_iv_rv, self.rv_window_min = float(min_iv_rv), float(rv_window_min)
 
     def on_day_start(self, engine: Backtest) -> None:
         self.t_entry = engine.day.t_index(self.entry_time)
@@ -146,6 +178,8 @@ class ShortStrangle(TimedExitMixin, Strategy):
 
     def _pick_legs(self, engine: Backtest, t: int) -> list[Leg] | None:
         day = engine.day
+        if not vol_rich_enough(day, t, self.min_iv_rv, self.rv_window_min):
+            return None
         g = day.greeks_at(t)
         call_d, put_d = g["delta"][:, CALL], np.abs(g["delta"][:, PUT])
         valid_c = np.isfinite(call_d) & (day.strikes > day.spot[t]) & (day.ask[t, :, CALL] > 0)
@@ -190,7 +224,8 @@ class SuperTrendCreditSpread(TimedExitMixin, Strategy):
     def __init__(self, entry_time="10:00:00", exit_time="15:00:00",
                  atr_period=10, atr_mult=3.0, short_delta=0.20, wing_pts=25.0,
                  stop_mult=2.0, profit_frac=0.5, qty=1, signal_symbol="ES",
-                 min_tte_secs=120, reverse_on_opposite=True):
+                 min_tte_secs=120, reverse_on_opposite=True,
+                 min_iv_rv=0.0, rv_window_min=30):
         self.entry_time, self.exit_time = entry_time, exit_time
         self.atr_period, self.atr_mult = int(atr_period), float(atr_mult)
         self.short_delta, self.wing_pts = float(short_delta), float(wing_pts)
@@ -198,6 +233,7 @@ class SuperTrendCreditSpread(TimedExitMixin, Strategy):
         self.signal_symbol = signal_symbol
         self.min_tte_secs = int(min_tte_secs)
         self.reverse_on_opposite = bool(reverse_on_opposite)
+        self.min_iv_rv, self.rv_window_min = float(min_iv_rv), float(rv_window_min)
 
     def on_day_start(self, engine: Backtest) -> None:
         from ..indicators.supertrend import day_signals
@@ -244,6 +280,8 @@ class SuperTrendCreditSpread(TimedExitMixin, Strategy):
         for right in self.by_t.get(t, []):
             if tte < self.min_tte_secs:
                 continue
+            if not vol_rich_enough(day, t, self.min_iv_rv, self.rv_window_min):
+                continue  # premium too thin to sell here; keep current position
             bullish = right == CALL  # CALL signal == bullish SuperTrend flip
             if self.reverse_on_opposite:
                 for tr in list(engine.open_trades):
