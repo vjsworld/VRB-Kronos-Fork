@@ -111,13 +111,16 @@ class BacktestTab(QWidget):
         m = int(round((decimal_hr - h) * 60))
         return f"{h:02d}:{m:02d}:00"
 
-    def strategy_factory(self):
+    def strategy_spec(self):
+        """Return (strategy_cls, kwargs) — picklable for the parallel runner."""
         entry, exit_ = self._hhmmss(self.entry_box.value()), self._hhmmss(self.exit_box.value())
         stop, target = self.stop_box.value(), self.target_box.value()
         if self.strategy_box.currentText() == "Short Straddle":
-            return lambda: ShortStraddle(entry, exit_, stop, target)
+            return ShortStraddle, dict(entry_time=entry, exit_time=exit_,
+                                       stop_mult=stop, profit_frac=target)
         delta, wing = self.delta_box.value(), self.wing_box.value()
-        return lambda: IronCondor(entry, exit_, delta, wing, stop, target)
+        return IronCondor, dict(entry_time=entry, exit_time=exit_, target_delta=delta,
+                                wing_pts=wing, stop_mult=stop, profit_frac=target)
 
     def run_backtest(self) -> None:
         if self.worker and self.worker.isRunning():
@@ -127,13 +130,15 @@ class BacktestTab(QWidget):
         if not dates:
             self.status.setText("No common data days found.")
             return
-        factory = self.strategy_factory()
+        strat_cls, strat_kwargs = self.strategy_spec()
         label = self.strategy_box.currentText()
         self.run_btn.setEnabled(False)
-        self.status.setText(f"Running {label} over {len(dates)} days...")
+        self.status.setText(f"Running {label} over {len(dates)} days (parallel)...")
 
         def job(progress_cb):
-            return run_backtest_days(dates, factory, self.state.root, progress_cb)
+            from ..backtest.parallel import run_days_parallel
+            return run_days_parallel(dates, strat_cls, strat_kwargs,
+                                     self.state.root, progress_cb=progress_cb)
 
         self.worker = FnWorker(job)
         self.worker.progress.connect(self.status.setText)

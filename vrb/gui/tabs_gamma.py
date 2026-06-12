@@ -143,19 +143,20 @@ class GammaExplosionTab(QWidget):
             self.status.setText("No common data days.")
             return
 
-        def factory():
-            return LastHourGammaExplosion(
-                entry_time=p["entry_time"], exit_time=p["exit_time"],
-                atr_period=p["atr_period"], atr_mult=p["atr_mult"],
-                target_mult=p["target_mult"], target_delta=p["target_delta"],
-                qty=p["qty"], signal_symbol=p["symbol"], min_tte_secs=p["min_tte"],
-                reverse_on_opposite=p["reverse"])
+        kwargs = dict(
+            entry_time=p["entry_time"], exit_time=p["exit_time"],
+            atr_period=p["atr_period"], atr_mult=p["atr_mult"],
+            target_mult=p["target_mult"], target_delta=p["target_delta"],
+            qty=p["qty"], signal_symbol=p["symbol"], min_tte_secs=p["min_tte"],
+            reverse_on_opposite=p["reverse"])
 
         self.run_btn.setEnabled(False)
-        self.status.setText(f"Running over {len(dates)} days...")
+        self.status.setText(f"Running over {len(dates)} days (parallel)...")
 
         def job(progress_cb):
-            return run_backtest_days(dates, factory, self.state.root, progress_cb)
+            from ..backtest.parallel import run_days_parallel
+            return run_days_parallel(dates, LastHourGammaExplosion, kwargs,
+                                     self.state.root, progress_cb=progress_cb)
 
         self.worker = FnWorker(job)
         self.worker.progress.connect(self.status.setText)
