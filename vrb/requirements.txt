@@ -2,3 +2,6 @@
 pyarrow>=21.0
 scikit-learn>=1.6
 joblib>=1.4
+# desktop GUI (Trading Workbench)
+PyQt6>=6.7
+pyqtgraph>=0.13

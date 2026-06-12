@@ -58,6 +58,47 @@ class KronosForecaster:
         self.lookback, self.pred_len = lookback, pred_len
         self.temperature, self.top_p, self.sample_count = temperature, top_p, sample_count
 
+    def forecast_paths(self, date: str, anchor: np.datetime64,
+                       fut_symbol: str = "ES", n_paths: int = 10,
+                       hist_bars: int = 120) -> dict:
+        """Sample n_paths independent Kronos forecasts anchored at a bar close.
+
+        Returns dict: hist_ts/hist_o/h/l/c (display context), pred_ts,
+        paths (n_paths, pred_len) of forecast closes, last_close.
+        """
+        bars = resample_1min(ib.load_day(fut_symbol, date))
+        bar_ts = bars["timestamps"].to_numpy().astype("datetime64[s]")
+        end = int(np.searchsorted(bar_ts, anchor, side="right"))
+        start = end - self.lookback
+        if start < 0 or end == 0:
+            raise ValueError(f"not enough {fut_symbol} context before {anchor}")
+        window = bars.iloc[start:end]
+        df = window[["open", "high", "low", "close", "volume", "amount"]]
+        x_ts = pd.Series(window["timestamps"].values)
+        future = pd.date_range(pd.Timestamp(bar_ts[end - 1]) + pd.Timedelta(minutes=1),
+                               periods=self.pred_len, freq="min")
+        y_ts = pd.Series(future)
+
+        preds = self.predictor.predict_batch(
+            [df] * n_paths, [x_ts] * n_paths, [y_ts] * n_paths,
+            pred_len=self.pred_len, T=self.temperature, top_p=self.top_p,
+            sample_count=1, verbose=False)
+        paths = np.stack([p["close"].to_numpy(np.float64) for p in preds])
+
+        hist = bars.iloc[max(0, end - hist_bars):end]
+        return {
+            "hist_ts": hist["timestamps"].to_numpy().astype("datetime64[s]"),
+            "hist_o": hist["open"].to_numpy(float),
+            "hist_h": hist["high"].to_numpy(float),
+            "hist_l": hist["low"].to_numpy(float),
+            "hist_c": hist["close"].to_numpy(float),
+            "pred_ts": future.to_numpy().astype("datetime64[s]"),
+            "paths": paths,
+            "last_close": float(df["close"].iloc[-1]),
+            "bar_ts": bar_ts,
+            "bar_close": bars["close"].to_numpy(float),
+        }
+
     def day_features(self, date: str, grid_ts: np.ndarray,
                      t_indices: np.ndarray, fut_symbol: str = "ES") -> np.ndarray:
         """(len(t_indices), 2) Kronos features for the given snapshot indices."""

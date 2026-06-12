@@ -38,7 +38,44 @@ vrb/
     build_cache.py        pre-warm NPZ caches
     run_backtest.py       strategy backtests from the CLI
     train_forecaster.py   features -> model -> OOS signal backtest, end to end
+  backtest/payload.py     Qt-free result dicts shared by GUI/report/exports
+  gui/                    PyQt6 desktop app (Trading Workbench)
+    charts.py             candlestick + trade-arrow + equity pyqtgraph widgets
+    report.py             TradeStation-style performance metrics
+    tabs_backtest.py      day list + signal chart (blue/red/white arrows)
+    tabs_report.py        performance summary + equity/drawdown/bar graphs
+    tabs_mllab.py         train + walk-forward metrics + OOS signal equity
+    tabs_forecast.py      Kronos sampled forecast paths on a chart
 ```
+
+## Desktop app — VRB Trading Workbench
+
+```powershell
+python -m vrb.gui            # SPXW; pass NDX once its data finishes
+```
+
+A dark, multi-tab PyQt6 workbench:
+
+- **Backtest** — configure a strategy, run it over N recent days, then pick any
+  day in the list to see its candlestick chart with trade signals: **blue
+  arrows = buys, red arrows = sells, white arrows = exits**, dashed connectors,
+  fill/reason labels, and the intraday equity curve underneath. Crosshair with
+  live OHLC readout.
+- **Performance Report** — a TradeStation-style Strategy Performance Summary
+  (Total Net Profit, Gross Profit/Loss, Profit Factor, % Profitable, avg
+  win/loss, consecutive streaks, time-in-trade, intraday & close-to-close max
+  drawdown, return on account, Sharpe) split All / Buys / Sells, plus the
+  cumulative-equity, underwater-drawdown, daily-P&L-bar graphs and a monthly
+  returns table.
+- **ML Lab** — build features, walk-forward train, and backtest the resulting
+  signal out-of-sample with real NBBO fills; shows IC/hit-rate metrics and
+  per-feature information coefficients. Results flow to the Report tab.
+- **Kronos Forecast** — pick a day and anchor time; Kronos (GPU) samples N
+  forward paths from the ES 1-min context, overlaid on the candles with the
+  mean path and the actual future for comparison.
+
+All heavy work runs on background `QThread` workers, so the UI never freezes.
+NPZ caches make day switching feel instant after the first load.
 
 The NPZ cache (`vrb_cache/`, gitignored) makes warm loads ~30x faster than the
 parquet pivot (0.08s vs 2.6s per option day). Caches self-invalidate when the
