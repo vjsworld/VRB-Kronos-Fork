@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import traceback
 
+import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # Re-export the Qt-free payload builders so GUI code can import them from here.
@@ -50,4 +51,29 @@ def candles_for_day(date: str, symbol: str = "SPX") -> dict:
         "high": df["high"].to_numpy(float),
         "low": df["low"].to_numpy(float),
         "close": df["close"].to_numpy(float),
+    }
+
+
+def supertrend_for_day(date: str, symbol: str, period: int, multiplier: float,
+                       start: str, end: str, rth_only: bool = True) -> dict:
+    """SuperTrend chart data for one day, optionally sliced to the RTH window.
+
+    Returns ts/open/high/low/close/st/direction (display slice) plus the raw
+    reversal events (within [start, end]) for marker placement.
+    """
+    from ..indicators.supertrend import day_signals
+    sig = day_signals(date, symbol, period, multiplier, start, end)
+    ts = sig["ts"]
+    iso = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    if rth_only:
+        rth_open = np.datetime64(f"{iso}T08:30:00", "s")
+        rth_close = np.datetime64(f"{iso}T15:00:00", "s")
+        m = (ts >= rth_open) & (ts <= rth_close)
+    else:
+        m = np.ones(len(ts), bool)
+    return {
+        "ts": ts[m], "open": sig["open"][m], "high": sig["high"][m],
+        "low": sig["low"][m], "close": sig["close"][m],
+        "st": sig["st"][m], "direction": sig["direction"][m],
+        "events": sig["events"],
     }

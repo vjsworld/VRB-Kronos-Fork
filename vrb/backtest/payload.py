@@ -23,6 +23,11 @@ def legs_text(day: ChainDay, trade: Trade) -> str:
 def trade_payload(day: ChainDay, trade: Trade) -> dict:
     exit_value = float(np.sum(
         np.array([l.qty for l in trade.legs], np.float64) * trade.exit_prices))
+    debit = trade.entry_value > 0
+    # transaction = what we actually did (debit=BUY, credit=SELL);
+    # direction = market view for the arrow color (may differ, e.g. long put).
+    transaction = "BUY" if debit else "SELL"
+    direction = trade.signal_direction or ("buy" if debit else "sell")
     return {
         "label": trade.label,
         "legs": legs_text(day, trade),
@@ -33,7 +38,8 @@ def trade_payload(day: ChainDay, trade: Trade) -> dict:
         "pnl": trade.pnl(day.multiplier),
         "reason": trade.exit_reason,
         "contracts": int(sum(abs(l.qty) for l in trade.legs)),
-        "direction": "buy" if trade.entry_value > 0 else "sell",
+        "direction": direction,
+        "transaction": transaction,
         "entry_text": "",
         "exit_text": "",
     }
@@ -43,8 +49,7 @@ def day_payload(day: ChainDay, result: DayResult) -> dict:
     trades = []
     for tr in result.trades:
         t = trade_payload(day, tr)
-        side = "BUY" if t["direction"] == "buy" else "SELL"
-        t["entry_text"] = f"{side} {t['legs']} @ {abs(t['entry_value']):.2f}"
+        t["entry_text"] = f"{t['transaction']} {t['legs']} @ {abs(t['entry_value']):.2f}"
         t["exit_text"] = f"{t['reason'].upper()} @ {abs(t['exit_value']):.2f}"
         trades.append(t)
     return {

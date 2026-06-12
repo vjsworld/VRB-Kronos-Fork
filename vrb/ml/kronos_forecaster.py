@@ -17,28 +17,9 @@ import numpy as np
 import pandas as pd
 
 from ..data import ib
+from ..data.ib import resample_1min  # re-exported for backward compatibility
 
 KRONOS_FEATURE_NAMES = ["kronos_exp_ret", "kronos_path_vol"]
-
-
-def resample_1min(bars: dict[str, np.ndarray]) -> pd.DataFrame:
-    """1-sec bar-close rows -> 1-min OHLCV labeled at minute close (point-in-time)."""
-    ts = bars["ts"].astype("datetime64[s]")
-    # bar stamped at close: second :00 belongs to the minute that just ended
-    minute = (ts - np.timedelta64(1, "s")).astype("datetime64[m]") + np.timedelta64(1, "m")
-    df = pd.DataFrame({
-        "minute": minute.astype("datetime64[ns]"),
-        "open": bars["open"], "high": bars["high"],
-        "low": bars["low"], "close": bars["close"], "volume": bars["volume"],
-    })
-    g = df.groupby("minute", sort=True)
-    out = pd.DataFrame({
-        "open": g["open"].first(), "high": g["high"].max(),
-        "low": g["low"].min(), "close": g["close"].last(),
-        "volume": g["volume"].sum(),
-    })
-    out["amount"] = out["volume"] * out["close"]
-    return out.reset_index().rename(columns={"minute": "timestamps"})
 
 
 class KronosForecaster:

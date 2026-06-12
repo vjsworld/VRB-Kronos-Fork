@@ -68,6 +68,20 @@ def main() -> None:
     win.tabs.setCurrentIndex(2); grab(win, "tab3_mllab")
     win.tabs.setCurrentIndex(3); grab(win, "tab4_forecast")
 
+    # Gamma Explosion tab: run the strategy and render its ES+SuperTrend chart
+    from vrb.backtest.strategies import LastHourGammaExplosion
+    gpayloads = run_backtest_days(
+        dates, lambda: LastHourGammaExplosion(entry_time="13:00:00", exit_time="15:00:00"),
+        "SPXW", print)
+    win.state.set_results("Last Hour Gamma Explosion", gpayloads)
+    win.gamma_tab.populate_days(gpayloads)
+    gtraded = next((i for i, p in enumerate(gpayloads) if p["n_trades"] > 0), len(gpayloads) - 1)
+    win.gamma_tab.day_table.selectRow(gtraded)
+    win.tabs.setCurrentIndex(1)
+    for _ in range(6):
+        app.processEvents()
+    grab(win, "tab_gamma")
+
     # also render an iron condor day to confirm multi-leg arrows
     payloads2 = run_backtest_days(dates, lambda: IronCondor(), "SPXW", print)
     win.state.set_results("Iron Condor", payloads2)

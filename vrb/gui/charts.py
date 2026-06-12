@@ -110,6 +110,20 @@ class SignalChart(pg.GraphicsLayoutWidget):
                           np.asarray(l, float), np.asarray(c, float))
         self.price_plot.autoRange()
 
+    def add_supertrend(self, ts: np.ndarray, st_line: np.ndarray,
+                       direction: np.ndarray) -> None:
+        """Overlay the SuperTrend line, green in uptrends and red in downtrends.
+
+        connect='finite' breaks each colored line at the NaN gaps so the two
+        segments don't draw spurious bridges across regime changes.
+        """
+        t = to_epoch(ts)
+        up = direction == 1
+        up_line = np.where(up, st_line, np.nan)
+        dn_line = np.where(direction == -1, st_line, np.nan)
+        self.price_plot.plot(t, up_line, pen=pg.mkPen(theme.UP, width=2), connect="finite")
+        self.price_plot.plot(t, dn_line, pen=pg.mkPen(theme.DOWN, width=2), connect="finite")
+
     def set_equity(self, ts: np.ndarray, equity: np.ndarray) -> None:
         self.equity_plot.clear()
         t = to_epoch(ts)
@@ -152,14 +166,16 @@ class SignalChart(pg.GraphicsLayoutWidget):
                 continue
             buy = tr["direction"] == "buy"
             color = theme.BUY if buy else theme.SELL
-            # entry: buys point up from below the low; sells point down from above the high
+            # ArrowItem: angle=90 points UP, angle=-90 points DOWN.
+            # entry: buys sit below the low pointing up; sells sit above the
+            # high pointing down (toward the bar, TradeStation-style).
             ey = l_arr[ie] - off if buy else h_arr[ie] + off
-            entry_angle = -90 if buy else 90  # ArrowItem: -90 points up
+            entry_angle = 90 if buy else -90
             self._arrow(te, ey, entry_angle, color)
             self._label(te, ey, tr.get("entry_text", ""), color, anchor=(0.5, 0 if buy else 1))
-            # exit: white, mirrored placement
+            # exit: white, mirrored placement, pointing toward the bar
             xy = h_arr[ix] + off if buy else l_arr[ix] - off
-            exit_angle = 90 if buy else -90
+            exit_angle = -90 if buy else 90
             self._arrow(tx, xy, exit_angle, theme.EXIT)
             pnl = tr.get("pnl", 0.0)
             self._label(tx, xy, f"{tr.get('exit_text', '')}  {pnl:+,.0f}",

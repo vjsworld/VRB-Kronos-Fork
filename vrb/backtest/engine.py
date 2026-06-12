@@ -38,6 +38,10 @@ class Trade:          # compare ndarray fields (raises on equal-valued trades)
     exit_reason: str = ""
     entry_costs: float = 0.0            # dollars
     exit_costs: float = 0.0
+    # optional market-view tag for chart arrows: "buy" (bullish/blue) or
+    # "sell" (bearish/red). Strategies whose debit/credit sign doesn't encode
+    # the view (e.g. buying a put is bearish) set this explicitly.
+    signal_direction: str = ""
 
     def pnl(self, multiplier: int) -> float:
         """Realized P&L in dollars (only valid after exit)."""
