@@ -51,7 +51,9 @@ vrb/
 ## Desktop app — VRB Trading Workbench
 
 ```powershell
-python -m vrb.gui            # SPXW; pass NDX once its data finishes
+python main.py              # from the repo root (SPXW default)
+python main.py NDX          # start on a different option root
+# equivalent: python -m vrb.gui [ROOT]
 ```
 
 A dark, multi-tab PyQt6 workbench:
