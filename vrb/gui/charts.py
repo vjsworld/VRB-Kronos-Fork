@@ -139,29 +139,61 @@ class SignalChart(pg.GraphicsLayoutWidget):
                              name=name or None)
         self.price_plot.autoRange()  # re-include the overlay in the view
 
-    def set_premium(self, ts: np.ndarray, call_prem: np.ndarray,
-                    put_prem: np.ndarray) -> None:
-        """Plot the held-option premium on the RIGHT axis — call segments blue,
-        put segments red (matching the entry-arrow colors). NaN where flat."""
+    def set_premium(self, ts: np.ndarray, series_a: np.ndarray,
+                    series_b: np.ndarray | None = None, color_a: str = theme.BUY,
+                    color_b: str = theme.SELL,
+                    label: str = "Held option premium (pts)") -> None:
+        """Plot one or two premium series on the RIGHT axis. NaN breaks the line.
+
+        Gamma uses two (call=blue, put=red); theta harvesting passes one (the
+        structure's decaying buyback cost).
+        """
         self._ensure_premium_vb()
         self.premium_vb.clear()
+        self.price_plot.getAxis("right").setLabel(label)
         t = to_epoch(ts)
-        call_prem = np.asarray(call_prem, float)
-        put_prem = np.asarray(put_prem, float)
-        if np.isfinite(call_prem).any():
-            self.premium_vb.addItem(pg.PlotCurveItem(
-                t, call_prem, pen=pg.mkPen(theme.BUY, width=2), connect="finite"))
-        if np.isfinite(put_prem).any():
-            self.premium_vb.addItem(pg.PlotCurveItem(
-                t, put_prem, pen=pg.mkPen(theme.SELL, width=2), connect="finite"))
-        allp = np.concatenate([call_prem[np.isfinite(call_prem)],
-                               put_prem[np.isfinite(put_prem)]])
+        finite = []
+        for series, color in ((series_a, color_a), (series_b, color_b)):
+            if series is None:
+                continue
+            series = np.asarray(series, float)
+            if np.isfinite(series).any():
+                self.premium_vb.addItem(pg.PlotCurveItem(
+                    t, series, pen=pg.mkPen(color, width=2), connect="finite"))
+                finite.append(series[np.isfinite(series)])
+        allp = np.concatenate(finite) if finite else np.array([])
         self._premium_span = max(float(allp.max() - allp.min()) if allp.size else 1.0, 1e-6)
         if allp.size:
             lo, hi = float(allp.min()), float(allp.max())
             pad = max((hi - lo) * 0.18, 0.5)
             self.premium_vb.setYRange(max(0.0, lo - pad), hi + pad)
         self._sync_premium_vb()
+
+    def add_premium_markers_xy(self, markers: list[dict]) -> None:
+        """Place premium-axis markers from explicit points. Each marker dict:
+        {x: datetime64, y: float, kind: 'entry'|'exit', color: str,
+         text: str, label_color: str}."""
+        if self.premium_vb is None:
+            return
+        off = getattr(self, "_premium_span", 1.0) * 0.06
+        for m in markers:
+            x = to_epoch(np.array([m["x"]], "datetime64[s]"))[0]
+            is_exit = m["kind"] == "exit"
+            y = m["y"] + (off if is_exit else -off)
+            self._premium_arrow(x, y, -90 if is_exit else 90, m["color"])
+            if m.get("text"):
+                anchor = (0.5, 0) if is_exit else (0.5, 1)
+                self._premium_label(x, y, m["text"], m.get("label_color", m["color"]), anchor)
+
+    def add_strike_segments(self, segments: list[tuple]) -> None:
+        """Draw horizontal strike lines on the LEFT axis over a time window.
+        Each segment: (t0: datetime64, t1: datetime64, price: float, color: str).
+        Used to show a short structure's 'tent' (the sold strikes)."""
+        for t0, t1, price, color in segments:
+            x0 = to_epoch(np.array([t0], "datetime64[s]"))[0]
+            x1 = to_epoch(np.array([t1], "datetime64[s]"))[0]
+            self.price_plot.plot([x0, x1], [price, price],
+                                 pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
 
     def add_premium_markers(self, trades: list[dict], ts: np.ndarray,
                             call_prem: np.ndarray, put_prem: np.ndarray) -> None:

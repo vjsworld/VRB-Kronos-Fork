@@ -125,6 +125,53 @@ class IronCondor(TimedExitMixin, Strategy):
             self.done = True
 
 
+class ShortStrangle(TimedExitMixin, Strategy):
+    """Sell a call and a put at ~target_delta (undefined risk, more credit).
+
+    Same time-based management as the iron condor (profit target as a fraction
+    of credit, stop at a multiple of credit, else hold to 15:00 settlement).
+    """
+
+    def __init__(self, entry_time="10:00:00", exit_time="15:00:00",
+                 target_delta=0.16, stop_mult=2.0, profit_frac=0.5, qty=1):
+        self.entry_time, self.exit_time = entry_time, exit_time
+        self.target_delta = target_delta
+        self.stop_mult, self.profit_frac, self.qty = stop_mult, profit_frac, qty
+
+    def on_day_start(self, engine: Backtest) -> None:
+        self.t_entry = engine.day.t_index(self.entry_time)
+        self.t_exit = engine.day.t_index(self.exit_time)
+        self.trade: Trade | None = None
+        self.done = False
+
+    def _pick_legs(self, engine: Backtest, t: int) -> list[Leg] | None:
+        day = engine.day
+        g = day.greeks_at(t)
+        call_d, put_d = g["delta"][:, CALL], np.abs(g["delta"][:, PUT])
+        valid_c = np.isfinite(call_d) & (day.strikes > day.spot[t]) & (day.ask[t, :, CALL] > 0)
+        valid_p = np.isfinite(put_d) & (day.strikes < day.spot[t]) & (day.ask[t, :, PUT] > 0)
+        if valid_c.sum() == 0 or valid_p.sum() == 0:
+            return None
+        kc = int(np.nanargmin(np.where(valid_c, np.abs(call_d - self.target_delta), np.inf)))
+        kp = int(np.nanargmin(np.where(valid_p, np.abs(put_d - self.target_delta), np.inf)))
+        q = self.qty
+        return [Leg(kc, CALL, -q), Leg(kp, PUT, -q)]
+
+    def on_snapshot(self, engine: Backtest, t: int) -> None:
+        if self.done or t < self.t_entry:
+            return
+        if self.trade is None:
+            legs = self._pick_legs(engine, t)
+            self.trade = engine.open(t, legs, "short_strangle") if legs else None
+            if self.trade is None and t > self.t_entry + 60:
+                self.done = True
+            return
+        if self.trade in engine.open_trades:
+            self.manage(engine, t, self.trade, self.t_exit)
+        else:
+            self.done = True
+
+
 class LastHourGammaExplosion(Strategy):
     """Buy 0DTE options on SuperTrend reversals; ride to a profit multiple or expiry.
 

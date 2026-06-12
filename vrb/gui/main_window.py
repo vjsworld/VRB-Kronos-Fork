@@ -14,6 +14,7 @@ from .tabs_gamma import GammaExplosionTab
 from .tabs_mllab import MLLabTab
 from .tabs_report import ReportTab
 from .tabs_research import ResearchTab
+from .tabs_theta import ThetaHarvestTab
 
 
 class MainWindow(QMainWindow):
@@ -37,12 +38,14 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.backtest_tab = BacktestTab(self.state)
         self.gamma_tab = GammaExplosionTab(self.state)
+        self.theta_tab = ThetaHarvestTab(self.state)
         self.report_tab = ReportTab(self.state)
         self.forecast_tab = ForecastTab(self.state)
         self.mllab_tab = MLLabTab(self.state)
         self.research_tab = ResearchTab(self.state)
         self.tabs.addTab(self.backtest_tab, "Backtest")
         self.tabs.addTab(self.gamma_tab, "Gamma Explosion")
+        self.tabs.addTab(self.theta_tab, "Theta Harvesting")
         self.tabs.addTab(self.report_tab, "Performance Report")
         self.tabs.addTab(self.mllab_tab, "ML Lab")
         self.tabs.addTab(self.forecast_tab, "Kronos Forecast")
@@ -76,8 +79,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         """Join any in-flight worker thread before teardown so Qt never
         destroys a running QThread (which would abort the process)."""
-        for tab in (self.backtest_tab, self.gamma_tab, self.report_tab,
-                    self.forecast_tab, self.mllab_tab):
+        for tab in (self.backtest_tab, self.gamma_tab, self.theta_tab,
+                    self.report_tab, self.forecast_tab, self.mllab_tab):
             w = getattr(tab, "worker", None)
             if w is not None and w.isRunning():
                 w.requestInterruption()

@@ -54,6 +54,19 @@ def candles_for_day(date: str, symbol: str = "SPX") -> dict:
     }
 
 
+def rth_candles(date: str, symbol: str = "ES") -> dict:
+    """1-min OHLC candles sliced to the RTH session (08:30-15:00 CT)."""
+    bars = ib.resample_1min(ib.load_day(symbol, date))
+    ts = bars["timestamps"].to_numpy().astype("datetime64[s]")
+    iso = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    lo = np.datetime64(f"{iso}T08:30:00", "s")
+    hi = np.datetime64(f"{iso}T15:00:00", "s")
+    m = (ts >= lo) & (ts <= hi)
+    return {"ts": ts[m], "open": bars["open"].to_numpy(float)[m],
+            "high": bars["high"].to_numpy(float)[m], "low": bars["low"].to_numpy(float)[m],
+            "close": bars["close"].to_numpy(float)[m]}
+
+
 def supertrend_for_day(date: str, symbol: str, period: int, multiplier: float,
                        start: str, end: str, rth_only: bool = True) -> dict:
     """SuperTrend chart data for one day, optionally sliced to the RTH window.
