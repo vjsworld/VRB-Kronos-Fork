@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "PowerShell(& \"c:\\Users\\van\\source\\repos\\Kronos\\.venv\\Scripts\\python.exe\" *)",
       "PowerShell(Set-Location \"c:\\Users\\van\\source\\repos\\Kronos\"; & \".\\.venv\\Scripts\\python.exe\" *)",
