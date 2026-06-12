@@ -214,12 +214,12 @@ class GammaExplosionTab(QWidget):
         self.chart.set_candles(st["ts"], st["open"], st["high"], st["low"], st["close"])
         self.chart.add_supertrend(st["ts"], st["st"], st["direction"])
 
-        # SPX cash line (left axis) + held-option premium (right axis), both
-        # reconstructed from the option ChainDay for this date
+        # SPX cash line (left axis) + held-option premium (right axis) with the
+        # trade markers anchored to the OPTION premium curve (the instrument we
+        # actually trade), not the ES underlying that produced the signal
         self._overlay_underlying_and_premium(date, p)
 
         self.chart.set_equity(p["equity_ts"][::6], p["equity"][::6])
-        self.chart.add_trade_markers(p["trades"])
 
         self.trade_table.setRowCount(len(p["trades"]))
         for r, t in enumerate(p["trades"]):
@@ -260,3 +260,5 @@ class GammaExplosionTab(QWidget):
                 target = call_prem if right == CALL else put_prem
                 target[i0:i1 + 1] = seg
         self.chart.set_premium(day.ts, call_prem, put_prem)
+        # markers anchored to the option premium, not the ES candles
+        self.chart.add_premium_markers(p["trades"], day.ts, call_prem, put_prem)

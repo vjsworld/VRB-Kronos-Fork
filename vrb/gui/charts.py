@@ -11,6 +11,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPicture, QPen
 
+from ..data.theta import CALL
 from . import theme
 
 
@@ -155,11 +156,59 @@ class SignalChart(pg.GraphicsLayoutWidget):
                 t, put_prem, pen=pg.mkPen(theme.SELL, width=2), connect="finite"))
         allp = np.concatenate([call_prem[np.isfinite(call_prem)],
                                put_prem[np.isfinite(put_prem)]])
+        self._premium_span = max(float(allp.max() - allp.min()) if allp.size else 1.0, 1e-6)
         if allp.size:
             lo, hi = float(allp.min()), float(allp.max())
-            pad = max((hi - lo) * 0.15, 0.5)
+            pad = max((hi - lo) * 0.18, 0.5)
             self.premium_vb.setYRange(max(0.0, lo - pad), hi + pad)
         self._sync_premium_vb()
+
+    def add_premium_markers(self, trades: list[dict], ts: np.ndarray,
+                            call_prem: np.ndarray, put_prem: np.ndarray) -> None:
+        """Place entry/exit arrows on the OPTION premium curve (right axis),
+        anchored to the traded instrument's price rather than the underlying.
+
+        Entry arrow sits just below the premium point pointing up (blue=call,
+        red=put); exit arrow sits just above pointing down (white). The premium
+        line itself already connects entry to exit, so no separate connector.
+        """
+        if self.premium_vb is None:
+            return
+        t_all = ts.astype("datetime64[s]")
+        n = len(ts)
+        off = getattr(self, "_premium_span", 1.0) * 0.06
+        for tr in trades:
+            legs = tr.get("legs_detail") or []
+            if not legs:
+                continue
+            right = legs[0]["right"]
+            series = np.asarray(call_prem if right == CALL else put_prem, float)
+            i0 = int(np.clip(np.searchsorted(t_all, np.datetime64(tr["entry_ts"], "s")), 0, n - 1))
+            i1 = int(np.clip(np.searchsorted(t_all, np.datetime64(tr["exit_ts"], "s")), 0, n - 1))
+            ey = float(series[i0]) if np.isfinite(series[i0]) else abs(tr["entry_value"])
+            xy = float(series[i1]) if np.isfinite(series[i1]) else abs(tr["exit_value"])
+            te = to_epoch(np.array([tr["entry_ts"]], "datetime64[s]"))[0]
+            tx = to_epoch(np.array([tr["exit_ts"]], "datetime64[s]"))[0]
+            color = theme.BUY if tr["direction"] == "buy" else theme.SELL
+            self._premium_arrow(te, ey - off, 90, color)
+            self._premium_label(te, ey - off, tr.get("entry_text", ""), color, (0.5, 1))
+            self._premium_arrow(tx, xy + off, -90, theme.EXIT)
+            pnl = tr.get("pnl", 0.0)
+            self._premium_label(tx, xy + off, f"{tr.get('exit_text', '')}  {pnl:+,.0f}",
+                                theme.WIN if pnl >= 0 else theme.LOSS, (0.5, 0))
+
+    def _premium_arrow(self, x: float, y: float, angle: int, color: str) -> None:
+        a = pg.ArrowItem(angle=angle, tipAngle=42, baseAngle=8, headLen=16,
+                         brush=pg.mkBrush(color), pen=pg.mkPen("#000000", width=1))
+        a.setPos(x, y)
+        self.premium_vb.addItem(a, ignoreBounds=True)
+
+    def _premium_label(self, x: float, y: float, text: str, color: str, anchor) -> None:
+        if not text:
+            return
+        item = pg.TextItem(text=text, color=color, anchor=anchor)
+        item.setPos(x, y)
+        self.premium_vb.addItem(item, ignoreBounds=True)
 
     def add_supertrend(self, ts: np.ndarray, st_line: np.ndarray,
                        direction: np.ndarray) -> None:
