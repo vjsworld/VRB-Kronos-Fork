@@ -705,4 +705,4 @@ if __name__ == '__main__':
     else:
         print("Tip: Will use simulated data for demonstration")
     
-    app.run(debug=True, host='0.0.0.0', port=7070)
+    app.run(debug=True, host='0.0.0.0', port=7071)

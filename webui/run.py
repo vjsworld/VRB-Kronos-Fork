@@ -71,19 +71,20 @@ def main():
     try:
         from app import app
         print("✅ Web server started successfully!")
-        print(f"🌐 Access URL: http://localhost:7070")
+        print(f"🌐 Access URL: http://localhost:7071")
         print("💡 Tip: Press Ctrl+C to stop server")
-        
+
         # Auto-open browser
         time.sleep(2)
-        webbrowser.open('http://localhost:7070')
-        
+        webbrowser.open('http://localhost:7071')
+
         # Start Flask application
-        app.run(debug=True, host='0.0.0.0', port=7070)
-        
+        # Port 7071: AnyDesk permanently occupies the default 7070 on this machine
+        app.run(debug=True, host='0.0.0.0', port=7071)
+
     except Exception as e:
         print(f"❌ Startup failed: {e}")
-        print("Please check if port 7070 is occupied")
+        print("Please check if port 7071 is occupied")
 
 if __name__ == "__main__":
     main()
