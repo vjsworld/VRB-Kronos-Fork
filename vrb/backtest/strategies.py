@@ -228,7 +228,8 @@ class CompressionBuyer(Strategy):
     def __init__(self, entry_time="08:35:00", last_entry="13:30:00", side="put",
                  target_delta=0.06, target_mult=5.0, min_premium=0.20, max_premium=1.50,
                  max_rv=0.30, min_iv_rv=1.05, rv_window_min=15, hold_min=60,
-                 max_concurrent=1, qty=1):
+                 max_concurrent=1, qty=1, stop_frac=0.0, scale_adds=0,
+                 scale_trigger=0.5):
         self.entry_time, self.last_entry = entry_time, last_entry
         self.side = PUT if side == "put" else CALL
         self.target_delta, self.target_mult = float(target_delta), float(target_mult)
@@ -236,11 +237,21 @@ class CompressionBuyer(Strategy):
         self.max_rv, self.min_iv_rv = float(max_rv), float(min_iv_rv)
         self.rv_window_min, self.hold_min = float(rv_window_min), int(hold_min)
         self.max_concurrent, self.qty = int(max_concurrent), int(qty)
+        # exit mechanics (all optimizable):
+        # stop_frac: exit if bid <= stop_frac x avg cost (0 = no stop)
+        # scale_adds/scale_trigger: average down — buy another lot each time the
+        # ask drops to <= scale_trigger x current avg cost, up to scale_adds times.
+        # Target/stop/time apply to the GROUP at its blended avg cost.
+        self.stop_frac = float(stop_frac)
+        self.scale_adds, self.scale_trigger = int(scale_adds), float(scale_trigger)
 
     def on_day_start(self, engine: Backtest) -> None:
         self.t_first = engine.day.t_index(self.entry_time)
         self.t_last = engine.day.t_index(self.last_entry)
         self.exit_by: dict[int, int] = {}  # id(trade) -> exit grid index
+        self.group: list = []              # open trades forming one avg-cost position
+        self.group_k: int | None = None    # strike index of the group
+        self.group_deadline = 10**9
 
     def _gate(self, day, t: int) -> bool:
         rv = trailing_rv(day, t, int(self.rv_window_min) * 60)
@@ -260,21 +271,41 @@ class CompressionBuyer(Strategy):
             return None
         return int(np.argmin(np.where(ok, np.abs(delta - self.target_delta), np.inf)))
 
+    def _close_group(self, engine: Backtest, t: int, reason: str) -> None:
+        for tr in list(self.group):
+            if tr in engine.open_trades:
+                engine.close(t, tr, reason)
+        self.group, self.group_k = [], None
+
     def on_snapshot(self, engine: Backtest, t: int) -> None:
         day = engine.day
-        # manage open positions
-        for tr in list(engine.open_trades):
-            leg = tr.legs[0]
-            bid = float(day.bid[t, leg.k, leg.right])
-            cost = float(tr.entry_prices[0])
-            if np.isfinite(bid) and cost > 0 and bid >= self.target_mult * cost:
-                engine.close(t, tr, "target")
-            elif t >= self.exit_by.get(id(tr), 10**9):
-                engine.close(t, tr, "time")
-        # new entry
-        if not (self.t_first <= t <= self.t_last):
+        # ---- manage the open group at its blended average cost
+        self.group = [tr for tr in self.group if tr in engine.open_trades]
+        if self.group:
+            k = self.group_k
+            bid = float(day.bid[t, k, self.side])
+            ask = float(day.ask[t, k, self.side])
+            qty = sum(tr.legs[0].qty for tr in self.group)
+            avg = sum(float(tr.entry_prices[0]) * tr.legs[0].qty for tr in self.group) / qty
+            if np.isfinite(bid) and avg > 0 and bid >= self.target_mult * avg:
+                self._close_group(engine, t, "target")
+            elif self.stop_frac > 0 and np.isfinite(bid) and bid <= self.stop_frac * avg:
+                self._close_group(engine, t, "stop")
+            elif t >= self.group_deadline:
+                self._close_group(engine, t, "time")
+            elif (len(self.group) - 1 < self.scale_adds and t <= self.t_last
+                  and np.isfinite(ask) and 0 < ask <= self.scale_trigger * avg):
+                # average down: premium got really cheap relative to our cost
+                add = engine.open(t, [Leg(k, self.side, self.qty)], "compress_add")
+                if add is not None:
+                    add.signal_direction = "sell" if self.side == PUT else "buy"
+                    self.group.append(add)
             return
-        if len(engine.open_trades) >= self.max_concurrent or not self._gate(day, t):
+        # ---- new group entry (gate evaluated on minute marks: 12x cheaper
+        # than per-5s-snapshot IV solves, and realistic decision cadence)
+        if not (self.t_first <= t <= self.t_last) or t % 12 != 0:
+            return
+        if not self._gate(day, t):
             return
         k = self._pick(day, t)
         if k is None:
@@ -283,7 +314,9 @@ class CompressionBuyer(Strategy):
                             "compress_put" if self.side == PUT else "compress_call")
         if trade is not None:
             trade.signal_direction = "sell" if self.side == PUT else "buy"
-            self.exit_by[id(trade)] = t + self.hold_min * 60 // 5
+            self.group = [trade]
+            self.group_k = k
+            self.group_deadline = t + self.hold_min * 60 // 5
 
 
 class SuperTrendCreditSpread(TimedExitMixin, Strategy):
