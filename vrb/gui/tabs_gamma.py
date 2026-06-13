@@ -235,6 +235,7 @@ class GammaExplosionTab(QWidget):
         self._overlay_underlying_and_premium(date, p)
 
         self.chart.set_equity(p["equity_ts"][::6], p["equity"][::6])
+        self.chart.set_equity_underlay(st["ts"], st["close"], color=theme.FG, label="ES")
 
         self.trade_table.setRowCount(len(p["trades"]))
         for r, t in enumerate(p["trades"]):

@@ -146,8 +146,8 @@ class ThetaHarvestTab(QWidget):
         self.atr_period_box.parent().setVisible(is_credit)
         self.atr_mult_box.parent().setVisible(is_credit)
         self.reverse_box.setVisible(is_credit)
-        # wings apply to condor and credit spread, not the naked strangle
-        self.wing_box.setEnabled(structure != "Short Strangle")
+        # wings apply to every structure (strangle: 0 = naked, >0 = tail-capped)
+        self.wing_box.setEnabled(True)
 
     # ------------------------------------------------------------- helpers
     def _hhmmss(self, hr: float) -> str:
@@ -174,7 +174,8 @@ class ThetaHarvestTab(QWidget):
                 qty=qty, signal_symbol=self.symbol_box.currentText(),
                 reverse_on_opposite=self.reverse_box.isChecked(), **vol)
         return ShortStrangle, dict(entry_time=entry, exit_time=exit_, target_delta=delta,
-                                   stop_mult=stop, profit_frac=profit, qty=qty, **vol)
+                                   stop_mult=stop, profit_frac=profit, qty=qty,
+                                   wing_pts=self.wing_box.value(), **vol)
 
     def _engine_kwargs(self) -> dict:
         # fill quality maps to the engine's spread-improvement (0=cross, 1=mid)
@@ -318,6 +319,7 @@ class ThetaHarvestTab(QWidget):
                                    label="Structure buyback cost (pts)")
         self.chart.add_premium_markers_xy(markers)
         self.chart.set_equity(p["equity_ts"][::6], p["equity"][::6])
+        self.chart.set_equity_underlay(st["ts"], st["close"], color=theme.FG, label="ES")
 
         self.trade_table.setRowCount(len(p["trades"]))
         tag_color = {"VBP": VBP_COLOR, "VBC": VBC_COLOR}

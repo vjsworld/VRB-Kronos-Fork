@@ -156,19 +156,23 @@ class IronCondor(TimedExitMixin, Strategy):
 
 
 class ShortStrangle(TimedExitMixin, Strategy):
-    """Sell a call and a put at ~target_delta (undefined risk, more credit).
+    """Sell a call and a put at ~target_delta. With wing_pts > 0, also buy far
+    protective wings that distance OUT — capping the tail at minimal cost to the
+    gross (deep-OTM wings are nearly free), which is the tail-controlled
+    strangle. wing_pts = 0 leaves it naked (undefined risk).
 
-    Same time-based management as the iron condor (profit target as a fraction
-    of credit, stop at a multiple of credit, else hold to 15:00 settlement).
+    Time-based management: profit target as a fraction of credit, stop at a
+    multiple of credit, else hold to 15:00 settlement.
     """
 
     def __init__(self, entry_time="10:00:00", exit_time="15:00:00",
                  target_delta=0.16, stop_mult=2.0, profit_frac=0.5, qty=1,
-                 min_iv_rv=0.0, rv_window_min=30):
+                 min_iv_rv=0.0, rv_window_min=30, wing_pts=0.0):
         self.entry_time, self.exit_time = entry_time, exit_time
         self.target_delta = target_delta
         self.stop_mult, self.profit_frac, self.qty = stop_mult, profit_frac, qty
         self.min_iv_rv, self.rv_window_min = float(min_iv_rv), float(rv_window_min)
+        self.wing_pts = float(wing_pts)
 
     def on_day_start(self, engine: Backtest) -> None:
         self.t_entry = engine.day.t_index(self.entry_time)
@@ -189,7 +193,13 @@ class ShortStrangle(TimedExitMixin, Strategy):
         kc = int(np.nanargmin(np.where(valid_c, np.abs(call_d - self.target_delta), np.inf)))
         kp = int(np.nanargmin(np.where(valid_p, np.abs(put_d - self.target_delta), np.inf)))
         q = self.qty
-        return [Leg(kc, CALL, -q), Leg(kp, PUT, -q)]
+        legs = [Leg(kc, CALL, -q), Leg(kp, PUT, -q)]
+        if self.wing_pts > 0:  # buy far protective wings -> defined risk
+            kcw = int(np.searchsorted(day.strikes, day.strikes[kc] + self.wing_pts))
+            kpw = int(np.searchsorted(day.strikes, day.strikes[kp] - self.wing_pts, side="right")) - 1
+            if kcw < len(day.strikes) and kcw > kc and kpw >= 0 and kpw < kp:
+                legs += [Leg(kcw, CALL, q), Leg(kpw, PUT, q)]
+        return legs
 
     def on_snapshot(self, engine: Backtest, t: int) -> None:
         if self.done or t < self.t_entry:

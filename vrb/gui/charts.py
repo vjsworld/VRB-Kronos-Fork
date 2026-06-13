@@ -96,7 +96,8 @@ class SignalChart(pg.GraphicsLayoutWidget):
                                      rateLimit=30, slot=self._mouse_moved)
         self._candles: CandlestickItem | None = None
         self._bar_data = None
-        self.premium_vb = None  # lazily-created right-axis viewbox for premium
+        self.premium_vb = None      # lazily-created right-axis viewbox for premium
+        self.equity_rvb = None      # lazily-created right-axis viewbox (ES on equity)
 
     # --------------------------------------------------- right-axis premium VB
     def _ensure_premium_vb(self) -> None:
@@ -258,6 +259,8 @@ class SignalChart(pg.GraphicsLayoutWidget):
 
     def set_equity(self, ts: np.ndarray, equity: np.ndarray) -> None:
         self.equity_plot.clear()
+        if self.equity_rvb is not None:
+            self.equity_rvb.clear()
         t = to_epoch(ts)
         pen = pg.mkPen(theme.EQUITY, width=2)
         self.equity_plot.plot(t, equity, pen=pen)
@@ -268,6 +271,38 @@ class SignalChart(pg.GraphicsLayoutWidget):
         zero_curve = self.equity_plot.plot(t, np.zeros_like(equity), pen=pg.mkPen(None))
         between = pg.FillBetweenItem(fill, zero_curve, brush=pg.mkBrush(239, 83, 80, 60))
         self.equity_plot.addItem(between)
+
+    def _ensure_equity_rvb(self) -> None:
+        if self.equity_rvb is not None:
+            return
+        self.equity_rvb = pg.ViewBox()
+        self.equity_plot.showAxis("right")
+        self.equity_plot.scene().addItem(self.equity_rvb)
+        self.equity_plot.getAxis("right").linkToView(self.equity_rvb)
+        self.equity_rvb.setXLink(self.equity_plot)
+        self.equity_plot.vb.sigResized.connect(self._sync_equity_rvb)
+        self._sync_equity_rvb()
+
+    def _sync_equity_rvb(self) -> None:
+        if self.equity_rvb is not None:
+            self.equity_rvb.setGeometry(self.equity_plot.vb.sceneBoundingRect())
+
+    def set_equity_underlay(self, ts: np.ndarray, values: np.ndarray,
+                            color: str = theme.FG, label: str = "ES") -> None:
+        """Overlay a price line (e.g. ES) on the equity subplot, scaled on its
+        own RIGHT axis so the equity curve can be read against the underlying."""
+        self._ensure_equity_rvb()
+        self.equity_rvb.clear()
+        self.equity_plot.getAxis("right").setLabel(label)
+        v = np.asarray(values, float)
+        self.equity_rvb.addItem(pg.PlotCurveItem(
+            to_epoch(ts), v, pen=pg.mkPen(color, width=1.2), connect="finite"))
+        fin = v[np.isfinite(v)]
+        if fin.size:
+            lo, hi = float(fin.min()), float(fin.max())
+            pad = max((hi - lo) * 0.08, 0.5)
+            self.equity_rvb.setYRange(lo - pad, hi + pad)
+        self._sync_equity_rvb()
 
     # --------------------------------------------------------------- markers
     def _bar_at(self, t_epoch: float) -> int | None:
