@@ -80,7 +80,8 @@ def scan_day(day: ChainDay, ratio_min: float = RATIO_MIN,
             cross = np.flatnonzero(finite_fut >= ratio_min * entry)
             out.append({
                 "date": day.date, "right": r, "strike": float(day.strikes[k]),
-                "anchor_t": t0, "entry_mid": entry,
+                "anchor_t": t0, "anchor_dt": str(day.ts[t0]),
+                "peak_dt": str(day.ts[t_peak]), "entry_mid": entry,
                 "peak_mid": float(mid[t_peak, k, r]), "ratio": float(br),
                 "min_to_10x": (float(cross[0] + 1) * GRID_SECS / 60.0) if cross.size else np.nan,
                 "min_to_peak": float(t_peak - t0) * GRID_SECS / 60.0,

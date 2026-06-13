@@ -216,6 +216,76 @@ class ShortStrangle(TimedExitMixin, Strategy):
             self.done = True
 
 
+class CompressionBuyer(Strategy):
+    """Buy cheap OTM premium when a compression gate fires (the expansion study's
+    precursor hypothesis). Gate: trailing realized vol low AND ATM IV/RV rich,
+    inside an early entry window. Buys a ~target_delta OTM option (put-weighted
+    by default — 62% of 10x events are puts), then exits at target_mult x entry
+    cost (asymmetric: a few big wins pay for many full-premium losses) or after
+    hold_min, else expiry settlement. Every threshold is optimizable.
+    """
+
+    def __init__(self, entry_time="08:35:00", last_entry="13:30:00", side="put",
+                 target_delta=0.06, target_mult=5.0, min_premium=0.20, max_premium=1.50,
+                 max_rv=0.30, min_iv_rv=1.05, rv_window_min=15, hold_min=60,
+                 max_concurrent=1, qty=1):
+        self.entry_time, self.last_entry = entry_time, last_entry
+        self.side = PUT if side == "put" else CALL
+        self.target_delta, self.target_mult = float(target_delta), float(target_mult)
+        self.min_premium, self.max_premium = float(min_premium), float(max_premium)
+        self.max_rv, self.min_iv_rv = float(max_rv), float(min_iv_rv)
+        self.rv_window_min, self.hold_min = float(rv_window_min), int(hold_min)
+        self.max_concurrent, self.qty = int(max_concurrent), int(qty)
+
+    def on_day_start(self, engine: Backtest) -> None:
+        self.t_first = engine.day.t_index(self.entry_time)
+        self.t_last = engine.day.t_index(self.last_entry)
+        self.exit_by: dict[int, int] = {}  # id(trade) -> exit grid index
+
+    def _gate(self, day, t: int) -> bool:
+        rv = trailing_rv(day, t, int(self.rv_window_min) * 60)
+        iv = day.atm_iv(t)
+        if not (np.isfinite(rv) and rv > 0 and np.isfinite(iv)):
+            return False
+        return rv <= self.max_rv and (iv / rv) >= self.min_iv_rv
+
+    def _pick(self, day, t: int) -> int | None:
+        r = self.side
+        mid = day.mid[t, :, r]
+        otm = (day.strikes < day.spot[t]) if r == PUT else (day.strikes > day.spot[t])
+        delta = np.abs(day.greeks_at(t)["delta"][:, r])
+        ok = (otm & np.isfinite(mid) & (mid >= self.min_premium) & (mid <= self.max_premium)
+              & (day.ask[t, :, r] > 0) & np.isfinite(delta))
+        if not ok.any():
+            return None
+        return int(np.argmin(np.where(ok, np.abs(delta - self.target_delta), np.inf)))
+
+    def on_snapshot(self, engine: Backtest, t: int) -> None:
+        day = engine.day
+        # manage open positions
+        for tr in list(engine.open_trades):
+            leg = tr.legs[0]
+            bid = float(day.bid[t, leg.k, leg.right])
+            cost = float(tr.entry_prices[0])
+            if np.isfinite(bid) and cost > 0 and bid >= self.target_mult * cost:
+                engine.close(t, tr, "target")
+            elif t >= self.exit_by.get(id(tr), 10**9):
+                engine.close(t, tr, "time")
+        # new entry
+        if not (self.t_first <= t <= self.t_last):
+            return
+        if len(engine.open_trades) >= self.max_concurrent or not self._gate(day, t):
+            return
+        k = self._pick(day, t)
+        if k is None:
+            return
+        trade = engine.open(t, [Leg(k, self.side, self.qty)],
+                            "compress_put" if self.side == PUT else "compress_call")
+        if trade is not None:
+            trade.signal_direction = "sell" if self.side == PUT else "buy"
+            self.exit_by[id(trade)] = t + self.hold_min * 60 // 5
+
+
 class SuperTrendCreditSpread(TimedExitMixin, Strategy):
     """SuperTrend signal -> directional 0DTE credit spread (defined risk).
 
